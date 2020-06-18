@@ -6,14 +6,17 @@ use hyper::Client;
 use hyper_socks2::{Auth, SocksConnector};
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use structopt::StructOpt;
 use telegram_bot::connector::hyper::HyperConnector;
 use tera::{Context, Tera};
 
+use lru::LruCache;
 use telegram_bot::*;
 use url::Url;
 use youtrack_rs::client::{Executor, YouTrack};
+
+use std::sync::Mutex;
+use uuid::Uuid;
 
 lazy_static! {
     pub static ref TEMPLATES: Tera = {
@@ -30,6 +33,10 @@ lazy_static! {
         tera.autoescape_on(vec!["html", ".sql"]);
         tera
     };
+}
+
+lazy_static! {
+    pub static ref CACHES: Mutex<LruCache<Uuid, CallbackParams>> = Mutex::new(LruCache::new(100));
 }
 
 pub static BACKLOG_QUERY: &str = "project%3A%20airsearcher%20%20project%3A%20DCMon%20project%3A%20DCone%20project%3A%20KI%20project%3A%20RR%20project%3A%20RRMON%20project%3A%20TPLIT%20%23unresolved%20%20has%3A%20-%7BBoard%20All%20tasks%7D%20order%20by%3A%20Stream%20asc%2C%20Priority%20asc";
@@ -83,8 +90,8 @@ impl BotOpt {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct BacklogParams {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct BacklogParams {
     top: i32,
     skip: i32,
 }
@@ -113,10 +120,59 @@ impl BacklogParams {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "_type")]
-enum CallbackParams {
-    Backlog(BacklogParams),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoteForIssueParams {
+    id: String,
+    has_vote: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "_t")]
+pub enum CallbackParams {
+    BacklogNext(BacklogParams),
+    BacklogPrev(BacklogParams),
+    VoteForIssue(VoteForIssueParams),
+    BacklogStop,
+    Invalid,
+}
+
+fn backlog_keyboard(issues: &Vec<Issue>, params: &BacklogParams) -> InlineKeyboardMarkup {
+    let mut kb = InlineKeyboardMarkup::new();
+    let mut row: Vec<InlineKeyboardButton> = Vec::new();
+
+    let mut issues_row: Vec<InlineKeyboardButton> = Vec::new();
+    for (_, issue) in issues.iter().enumerate() {
+        issues_row.push(
+            CallbackParams::VoteForIssue(VoteForIssueParams {
+                id: issue.id_readable.clone(),
+                has_vote: issue.voters.has_vote,
+            })
+            .into(),
+        );
+        if issues_row.len() == 5 {
+            kb.add_row(issues_row);
+            issues_row = Vec::new();
+        }
+    }
+    kb.add_row(issues_row);
+
+    row.push(CallbackParams::BacklogStop {}.into());
+
+    if let Some(prev) = params.prev() {
+        row.push(CallbackParams::BacklogPrev(prev).into());
+    }
+    if issues.len() > 0 {
+        row.push(CallbackParams::BacklogNext(params.next()).into());
+    } else {
+        row.pop();
+        if let Some(prev) = params.prev() {
+            if let Some(prev) = prev.prev() {
+                row.push(CallbackParams::BacklogPrev(prev).into());
+            }
+        }
+    }
+    kb.add_row(row);
+    kb
 }
 
 async fn list_backlog(api: Api, yt: YouTrack, message: Message) -> Result<(), Error> {
@@ -126,24 +182,24 @@ async fn list_backlog(api: Api, yt: YouTrack, message: Message) -> Result<(), Er
         .query(BACKLOG_QUERY)
         .top("10")
         .skip("0")
-        .fields("idReadable,summary,votes")
-        .execute::<Value>();
-
-    let callback_data = CallbackParams::Backlog(BacklogParams::new(10).next());
-    let callback_data = serde_json::to_string(&callback_data).unwrap();
-
-    let kb = reply_markup!(inline_keyboard, ["next" callback callback_data]);
+        .fields("idReadable,summary,votes,voters(hasVote)")
+        .execute::<Vec<Issue>>();
 
     match issues {
         Ok((headers, status, json)) => {
             println!("{:#?}", headers);
             println!("{}", status);
-            if let Some(json) = json {
+            if let Some(issues) = json {
                 let mut context = Context::new();
-                context.insert("issues", &json);
+                context.insert("issues", &issues);
                 let txt_msg = TEMPLATES.render("issues_list.md", &context).unwrap();
-                api.send(message.text_reply(txt_msg).reply_markup(kb))
-                    .await?;
+                let params = BacklogParams::new(10);
+                api.send(
+                    message
+                        .text_reply(txt_msg)
+                        .reply_markup(backlog_keyboard(&issues, &params)),
+                )
+                .await?;
             }
         }
         Err(e) => {
@@ -175,60 +231,111 @@ async fn dispatch(api: Api, yt: YouTrack, message: Message) -> Result<(), Error>
     Ok(())
 }
 
+impl From<CallbackParams> for InlineKeyboardButton {
+    fn from(item: CallbackParams) -> Self {
+        let text: String = match &item {
+            CallbackParams::BacklogStop => "stop".to_string(),
+            CallbackParams::BacklogNext(_) => "next".to_string(),
+            CallbackParams::BacklogPrev(_) => "prev".to_string(),
+            CallbackParams::VoteForIssue(p) => p.id.clone(),
+            CallbackParams::Invalid => panic!("Do not use in keyboard"),
+        };
+        let uuid = Uuid::new_v4();
+        let mut map = CACHES.lock().unwrap();
+        map.put(uuid, item.clone());
+        InlineKeyboardButton::callback(text, uuid.to_string())
+    }
+}
+
+fn extract_params(cb: &CallbackQuery) -> Option<CallbackParams> {
+    let ref data = cb.data.clone()?;
+    match Uuid::parse_str(data) {
+        Ok(uuid) => {
+            let mut cache = CACHES.lock().unwrap();
+            let d = cache.pop(&uuid);
+            d
+        }
+        Err(_) => Some(CallbackParams::Invalid),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct IssueVoters {
+    #[serde(alias = "hasVote")]
+    has_vote: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Issue {
+    #[serde(alias = "idReadable")]
+    id_readable: String,
+    summary: String,
+    votes: i32,
+    voters: IssueVoters,
+}
+
 async fn dispatch_callback(api: Api, yt: YouTrack, cb: CallbackQuery) -> Result<(), Error> {
     println!("Query: {:?}", cb);
-    if let Some(data) = cb.data {
-        let data = serde_json::from_str(data.as_str()).unwrap();
-        match data {
-            CallbackParams::Backlog(params) => {
+    match extract_params(&cb) {
+        None => {
+            api.send(
+                cb.message
+                    .unwrap()
+                    .edit_reply_markup(Some(reply_markup!(inline_keyboard, []))),
+            )
+            .await?;
+        }
+        Some(data) => match data {
+            CallbackParams::Invalid => {
+                api.send(
+                    cb.message
+                        .unwrap()
+                        .text_reply(format!("Error occured: invalid callback parameter")),
+                )
+                .await?;
+            }
+            CallbackParams::VoteForIssue(p) => {
+                api.send(
+                    cb.message
+                        .unwrap()
+                        .text_reply(format!("Vote for issue: {:?}", p)),
+                )
+                .await?;
+            }
+            CallbackParams::BacklogStop => {
+                api.send(
+                    cb.message
+                        .unwrap()
+                        .edit_reply_markup(Some(reply_markup!(inline_keyboard, []))),
+                )
+                .await?;
+            }
+            CallbackParams::BacklogNext(params) | CallbackParams::BacklogPrev(params) => {
                 let issues = yt
                     .get()
                     .issues()
                     .query(BACKLOG_QUERY)
                     .top(params.top.to_string().as_str())
                     .skip(params.skip.to_string().as_str())
-                    .fields("idReadable,summary,votes")
-                    .execute::<Value>();
-
-                let next_callback_data = CallbackParams::Backlog(params.next());
-                let next_callback_data = serde_json::to_string(&next_callback_data).unwrap();
-
-                let mut kb = reply_markup!(inline_keyboard, ["next" callback next_callback_data]);
-                if let Some(prev) = params.prev() {
-                    let prev_callback_data = CallbackParams::Backlog(prev);
-                    let prev_callback_data = serde_json::to_string(&prev_callback_data).unwrap();
-
-                    let next_callback_data = CallbackParams::Backlog(params.next());
-                    let next_callback_data = serde_json::to_string(&next_callback_data).unwrap();
-                    kb = reply_markup!(inline_keyboard, ["prev" callback prev_callback_data, "next" callback next_callback_data])
-                }
+                    .fields("idReadable,summary,votes,voters(hasVote)")
+                    .execute::<Vec<Issue>>();
 
                 match issues {
                     Ok((headers, status, json)) => {
                         println!("{:#?}", headers);
                         println!("{}", status);
-                        if let Some(json) = json {
-                            if let serde_json::Value::Array(issues) = json {
-                                let msg = cb.message.unwrap();
-                                println!("{}", issues.len());
-                                if issues.len() > 0 {
-                                    let mut context = Context::new();
-                                    context.insert("issues", &issues);
-                                    let txt_msg =
-                                        TEMPLATES.render("issues_list.md", &context).unwrap();
-                                    api.send(msg.edit_text(txt_msg).reply_markup(kb)).await?;
-                                } else {
-                                    if let Some(prev) = params.prev() {
-                                        if let Some(prev) = prev.prev() {
-                                            let prev_callback_data = CallbackParams::Backlog(prev);
-                                            let prev_callback_data =
-                                                serde_json::to_string(&prev_callback_data).unwrap();
-                                            kb = reply_markup!(inline_keyboard, ["prev" callback prev_callback_data]);
-                                        }
-                                    }
-
-                                    api.send(msg.edit_reply_markup(Some(kb))).await?;
-                                }
+                        if let Some(issues) = json {
+                            let msg = cb.message.unwrap();
+                            println!("{}", issues.len());
+                            let kb = backlog_keyboard(&issues, &params);
+                            if issues.len() > 0 {
+                                let mut context = Context::new();
+                                context.insert("issues", &issues);
+                                let txt_msg = TEMPLATES.render("issues_list.md", &context).unwrap();
+                                api.send(msg.edit_text(txt_msg).reply_markup(kb)).await?;
+                            } else {
+                                api.send(msg.edit_text("No issues to display").reply_markup(kb))
+                                    .await?;
                             }
                         }
                     }
@@ -242,7 +349,7 @@ async fn dispatch_callback(api: Api, yt: YouTrack, cb: CallbackQuery) -> Result<
                     }
                 };
             }
-        }
+        },
     }
     Ok(())
 }
