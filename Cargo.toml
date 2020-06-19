@@ -20,6 +20,7 @@ serde = "1.0.39"
 lazy_static = "1.4.0"
 lru = "0.5.2"
 uuid = { version = "0.8", features = ["serde", "v4"] }
+error-chain = "0.12.2"
 
 [dependencies.tera]
 version = "1"
