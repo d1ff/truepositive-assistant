@@ -1,5 +1,6 @@
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::sync::Mutex;
 use telegram_bot::prelude::*;
 use telegram_bot::types::*;
@@ -64,9 +65,9 @@ fn backlog_keyboard(issues: &Vec<Issue>, params: &BacklogParams) -> InlineKeyboa
     let mut kb = InlineKeyboardMarkup::new();
     let mut row: Vec<InlineKeyboardButton> = Vec::new();
 
-    let mut issues_row: Vec<InlineKeyboardButton> = Vec::new();
-    for (_, issue) in issues.iter().enumerate() {
-        issues_row.push(
+    let mut issues_buttons: Vec<InlineKeyboardButton> = Vec::new();
+    for issue in issues.iter() {
+        issues_buttons.push(
             CallbackParams::VoteForIssue(
                 params.clone(),
                 VoteForIssueParams {
@@ -76,12 +77,10 @@ fn backlog_keyboard(issues: &Vec<Issue>, params: &BacklogParams) -> InlineKeyboa
             )
             .into(),
         );
-        if issues_row.len() == 5 {
-            kb.add_row(issues_row);
-            issues_row = Vec::new();
-        }
     }
-    kb.add_row(issues_row);
+    for row in issues_buttons.chunks(3) {
+        kb.add_row(row.to_vec());
+    }
 
     row.push(CallbackParams::BacklogStop {}.into());
 
@@ -183,7 +182,7 @@ impl Bot {
     }
 
     pub async fn list_backlog(&self, message: Message) -> Result<()> {
-        self.fetch_issues(message, BacklogParams::new(10)).await?;
+        self.fetch_issues(message, BacklogParams::new(5)).await?;
         Ok(())
     }
 
@@ -236,6 +235,14 @@ impl Bot {
         Ok(())
     }
 
+    async fn handle_start(&self, msg: Message) -> Result<()> {
+        self.api
+            .send(msg.text_reply(format!("Hello, {}", msg.from.first_name)))
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn dispatch(&self, message: Message) -> Result<()> {
         if let MessageKind::Text { ref data, .. } = message.kind {
             println!(
@@ -248,6 +255,7 @@ impl Bot {
 
             match data.as_str() {
                 "/backlog" => self.list_backlog(message).await?,
+                "/start" => self.handle_start(message).await?,
                 _ => {
                     println!("Unrecognized command");
                 }
@@ -275,10 +283,22 @@ impl Bot {
                 }
                 CallbackParams::VoteForIssue(b, p) => {
                     let msg = cb.message.unwrap();
-                    self.api
-                        .send(msg.text_reply(format!("Vote for issue: {:?}", p)))
-                        .await?;
-                    self.fetch_issues(msg, b).await?;
+                    let yt = self.get_youtrack(msg.from.id).await.unwrap();
+                    let has_vote = json!({"hasVote": !p.has_vote});
+                    let i = yt.post(has_vote).issues();
+                    let i = i.id(p.id.as_str());
+                    let i = i.voters().execute::<Value>();
+
+                    match i {
+                        Ok(_) => {
+                            self.fetch_issues(msg, b).await?;
+                        }
+                        Err(e) => {
+                            self.api
+                                .send(msg.text_reply(format!("Error occured: {}", e)))
+                                .await?;
+                        }
+                    }
                 }
                 CallbackParams::BacklogStop => {
                     let msg = cb.message.unwrap();

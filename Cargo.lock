@@ -2356,9 +2356,9 @@ dependencies = [
 
 [[package]]
 name = "youtrack-rs"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91f84df50b5715e2d72780d8474bc63c6950f525c70dd24fe0beeb836efa1716"
+checksum = "05627047f1576320c8b369a930c004099e064f2855f654a291e6ef6e261670c0"
 dependencies = [
  "error-chain",
  "futures 0.1.29",

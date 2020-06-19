@@ -27,7 +27,7 @@ version = "1"
 default-features = false
 
 [dependencies.youtrack-rs]
-version = "0.1"
+version = "0.1.1"
 default-features = false
 features = ["rust-native-tls"]
 
