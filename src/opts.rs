@@ -9,7 +9,7 @@ use youtrack_rs::client::YouTrack;
 
 use super::errors::*;
 
-#[derive(StructOpt, Debug)]
+#[derive(StructOpt, Debug, Clone)]
 #[structopt(name = "truepositive-assistant")]
 pub struct BotOpt {
     #[structopt(long, env = "TELEGRAM_BOT_TOKEN")]
@@ -26,6 +26,15 @@ pub struct BotOpt {
 
     #[structopt(long, env = "BACKLOG_QUERY")]
     pub youtrack_backlog: String,
+
+    #[structopt(long, env = "YOUTRACK_HUB_URL")]
+    pub youtrack_hub: String,
+
+    #[structopt(long, env = "YOUTRACK_CLIENTID")]
+    pub youtrack_client_id: String,
+
+    #[structopt(long, env = "YOUTRACK_CLIENTSECRET")]
+    pub youtrack_client_secret: String,
 }
 
 impl BotOpt {

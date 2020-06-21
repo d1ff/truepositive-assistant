@@ -21,6 +21,9 @@ lazy_static = "1.4.0"
 lru = "0.5.2"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 error-chain = "0.12.2"
+actix-web = "2.0.0"
+actix-rt = "1.0.0"
+oauth2 = { version = "3.0", features = ["futures-03"] }
 
 [dependencies.tera]
 version = "1"
@@ -32,4 +35,4 @@ default-features = false
 features = ["rust-native-tls"]
 
 [dev-dependencies]
-tokio = { version = "0.2", features = ["macros"] }
+tokio = { version = "0.2", features = ["macros", "rt-util"] }
