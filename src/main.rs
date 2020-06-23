@@ -8,6 +8,8 @@ extern crate telegram_bot;
 use futures::StreamExt;
 use structopt::StructOpt;
 
+use std::sync::{Arc, Mutex};
+
 mod bot;
 mod errors;
 mod opts;
@@ -21,17 +23,22 @@ use opts::*;
 async fn main() -> Result<()> {
     let opt = BotOpt::from_args();
 
-    let bot = Bot::new(opt.clone()).expect("Could not create bot");
+    let bot = Arc::new(Mutex::new(Box::new(
+        Bot::new(opt.clone()).expect("Could not create bot"),
+    )));
 
-    let mut stream = bot.stream();
+    let mut stream = bot.lock().unwrap().stream();
 
     let rt = tokio::task::LocalSet::new();
     let system = actix_rt::System::run_in_tokio("test", &rt);
-    let srv = yt_oauth::run(opt).unwrap();
+    let srv = yt_oauth::run(bot.clone()).unwrap();
 
     while let Some(update) = stream.next().await {
         let update = update?;
-        bot.dispatch_update(update).await?;
+        {
+            let mut bot = bot.lock().unwrap();
+            bot.dispatch_update(update).await?;
+        }
     }
 
     srv.await?;

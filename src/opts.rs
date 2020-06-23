@@ -1,6 +1,8 @@
 use hyper::Client;
 use hyper_socks2::{Auth, SocksConnector};
 use hyper_tls::HttpsConnector;
+use oauth2::basic::BasicClient;
+use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use structopt::StructOpt;
 use telegram_bot::connector::hyper::HyperConnector;
 use telegram_bot::Api;
@@ -67,5 +69,23 @@ impl BotOpt {
 
     pub fn youtrack_api(&self) -> Result<YouTrack> {
         YouTrack::new(self.youtrack_url.clone(), self.youtrack_token.clone()).map_err(|e| e.into())
+    }
+
+    pub fn oauth_client(&self) -> oauth2::basic::BasicClient {
+        let auth_url = AuthUrl::new(format!("{}/api/rest/oauth2/auth", self.youtrack_hub))
+            .expect("Invalid authorization endpoint URL");
+        let token_url = TokenUrl::new(format!("{}/api/rest/oauth2/token", self.youtrack_hub))
+            .expect("Invalid token endpoint URL");
+
+        BasicClient::new(
+            ClientId::new(self.youtrack_client_id.clone()),
+            Some(ClientSecret::new(self.youtrack_client_secret.clone())),
+            auth_url,
+            Some(token_url),
+        )
+        .set_redirect_url(
+            RedirectUrl::new("http://127.0.0.1:5000/auth".to_string())
+                .expect("Invalid redirect url"),
+        )
     }
 }

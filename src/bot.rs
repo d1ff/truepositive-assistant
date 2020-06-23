@@ -1,6 +1,9 @@
 use lru::LruCache;
+use oauth2::basic::BasicClient;
+use oauth2::{CsrfToken, Scope};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use telegram_bot::prelude::*;
 use telegram_bot::types::*;
@@ -148,8 +151,13 @@ pub struct Bot {
     api: Api,
     yt: YouTrack,
     templates: Tera,
+    pub yt_oauth: BasicClient,
     backlog_query: String,
+    csrf_tokens: HashMap<String, UserId>,
+    yt_tokens: HashMap<UserId, String>,
 }
+
+unsafe impl Send for Bot {}
 
 use url::form_urlencoded::byte_serialize;
 
@@ -170,6 +178,9 @@ impl Bot {
             yt: opts.youtrack_api()?,
             templates,
             backlog_query: byte_serialize(opts.youtrack_backlog.as_bytes()).collect(),
+            yt_oauth: opts.oauth_client(),
+            csrf_tokens: HashMap::new(),
+            yt_tokens: HashMap::new(),
         })
     }
 
@@ -178,72 +189,110 @@ impl Bot {
     }
 
     pub async fn get_youtrack(&self, user: UserId) -> Option<YouTrack> {
-        Some(self.yt.clone())
+        self.yt_tokens.get(&user).and_then(|token| {
+            let mut yt = self.yt.clone();
+            yt.set_token(token);
+            Some(yt)
+        })
     }
 
     pub async fn list_backlog(&self, message: Message) -> Result<()> {
-        self.fetch_issues(message, BacklogParams::new(5)).await?;
+        self.fetch_issues(message.from.id, message, BacklogParams::new(5))
+            .await?;
         Ok(())
     }
 
-    pub async fn fetch_issues(&self, msg: Message, params: BacklogParams) -> Result<()> {
-        let issues = self
-            .get_youtrack(msg.from.id)
-            .await
-            .unwrap()
-            .get()
-            .issues()
-            .query(self.backlog_query.as_str())
-            .top(params.top.to_string().as_str())
-            .skip(params.skip.to_string().as_str())
-            .fields("idReadable,summary,votes,voters(hasVote)")
-            .execute::<Vec<Issue>>();
+    pub async fn fetch_issues(
+        &self,
+        user: UserId,
+        msg: Message,
+        params: BacklogParams,
+    ) -> Result<()> {
+        match self.get_youtrack(user).await {
+            Some(yt) => {
+                let issues = yt
+                    .get()
+                    .issues()
+                    .query(self.backlog_query.as_str())
+                    .top(params.top.to_string().as_str())
+                    .skip(params.skip.to_string().as_str())
+                    .fields("idReadable,summary,votes,voters(hasVote)")
+                    .execute::<Vec<Issue>>();
 
-        match issues {
-            Ok((headers, status, json)) => {
-                println!("{:#?}", headers);
-                println!("{}", status);
-                if let Some(issues) = json {
-                    println!("{}", issues.len());
-                    let kb = backlog_keyboard(&issues, &params);
-                    let mut txt_msg: String = "No issues to display".to_string();
-                    if issues.len() > 0 {
-                        let mut context = Context::new();
-                        context.insert("issues", &issues);
-                        txt_msg = self.templates.render("issues_list.md", &context).unwrap();
+                match issues {
+                    Ok((headers, status, json)) => {
+                        println!("{:#?}", headers);
+                        println!("{}", status);
+                        if let Some(issues) = json {
+                            println!("{}", issues.len());
+                            let kb = backlog_keyboard(&issues, &params);
+                            let mut txt_msg: String = "No issues to display".to_string();
+                            if issues.len() > 0 {
+                                let mut context = Context::new();
+                                context.insert("issues", &issues);
+                                txt_msg =
+                                    self.templates.render("issues_list.md", &context).unwrap();
+                            }
+
+                            // TODO: check whether original message is from our bot
+                            if msg.from.is_bot {
+                                self.api
+                                    .send(msg.edit_text(txt_msg).reply_markup(kb))
+                                    .await?;
+                            } else {
+                                self.api
+                                    .send(msg.text_reply(txt_msg).reply_markup(kb))
+                                    .await?;
+                            };
+                        }
                     }
-
-                    // TODO: check whether original message is from our bot
-                    if msg.from.is_bot {
+                    Err(e) => {
                         self.api
-                            .send(msg.edit_text(txt_msg).reply_markup(kb))
+                            .send(msg.text_reply(format!("Error occured: {}", e)))
                             .await?;
-                    } else {
-                        self.api
-                            .send(msg.text_reply(txt_msg).reply_markup(kb))
-                            .await?;
-                    };
-                }
+                    }
+                };
             }
-            Err(e) => {
-                self.api
-                    .send(msg.text_reply(format!("Error occured: {}", e)))
-                    .await?;
-            }
-        };
-
+            None => println!("No token found"),
+        }
         Ok(())
     }
 
-    async fn handle_start(&self, msg: Message) -> Result<()> {
+    async fn handle_start(&mut self, msg: Message) -> Result<()> {
+        // Generate youtrack url
+        let (auth_url, csrf_token) = self
+            .yt_oauth
+            .authorize_url(CsrfToken::new_random)
+            .add_scope(Scope::new("YouTrack".to_string()))
+            .use_implicit_flow()
+            .url();
+        self.csrf_tokens
+            .insert(csrf_token.secret().clone(), msg.from.id);
+        let kb = reply_markup!(inline_keyboard,
+            ["Login" url auth_url]);
         self.api
-            .send(msg.text_reply(format!("Hello, {}", msg.from.first_name)))
+            .send(
+                msg.text_reply(format!("Hello, {}", msg.from.first_name))
+                    .reply_markup(kb),
+            )
             .await?;
 
         Ok(())
     }
 
-    pub async fn dispatch(&self, message: Message) -> Result<()> {
+    pub fn on_auth(&mut self, params: super::yt_oauth::AuthRequest) {
+        match self.csrf_tokens.get(&params.state) {
+            Some(user_id) => {
+                println!("Saving: {}", user_id);
+                self.yt_tokens.insert(user_id.clone(), params.access_token);
+            }
+            None => {
+                println!("No csrf token!");
+            }
+        };
+    }
+
+    pub async fn dispatch(&mut self, message: Message) -> Result<()> {
         if let MessageKind::Text { ref data, .. } = message.kind {
             println!(
                 "<{}>: {} {} {}",
@@ -283,20 +332,30 @@ impl Bot {
                 }
                 CallbackParams::VoteForIssue(b, p) => {
                     let msg = cb.message.unwrap();
-                    let yt = self.get_youtrack(msg.from.id).await.unwrap();
-                    let has_vote = json!({"hasVote": !p.has_vote});
-                    let i = yt.post(has_vote).issues();
-                    let i = i.id(p.id.as_str());
-                    let i = i.voters().execute::<Value>();
+                    let user = cb.from.id;
+                    match self.get_youtrack(user).await {
+                        Some(yt) => {
+                            let has_vote = json!({"hasVote": !p.has_vote});
+                            let i = yt.post(has_vote).issues();
+                            let i = i.id(p.id.as_str());
+                            let i = i.voters().execute::<Value>();
 
-                    match i {
-                        Ok(_) => {
-                            self.fetch_issues(msg, b).await?;
+                            match i {
+                                Ok((headers, status, json)) => {
+                                    println!("{:#?}", headers);
+                                    println!("{}", status);
+                                    println!("{:?}", json);
+                                    self.fetch_issues(user, msg, b).await?;
+                                }
+                                Err(e) => {
+                                    self.api
+                                        .send(msg.text_reply(format!("Error occured: {}", e)))
+                                        .await?;
+                                }
+                            }
                         }
-                        Err(e) => {
-                            self.api
-                                .send(msg.text_reply(format!("Error occured: {}", e)))
-                                .await?;
+                        None => {
+                            println!("No youtrack instance");
                         }
                     }
                 }
@@ -308,14 +367,14 @@ impl Bot {
                 }
                 CallbackParams::BacklogNext(params) | CallbackParams::BacklogPrev(params) => {
                     let msg = cb.message.unwrap();
-                    self.fetch_issues(msg, params).await?;
+                    self.fetch_issues(cb.from.id, msg, params).await?;
                 }
             },
         }
         Ok(())
     }
 
-    pub async fn dispatch_update(&self, update: Update) -> Result<()> {
+    pub async fn dispatch_update(&mut self, update: Update) -> Result<()> {
         println!("{:?}", update);
         match update.kind {
             UpdateKind::Message(message) => self.dispatch(message).await?,
