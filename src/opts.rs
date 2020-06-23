@@ -23,9 +23,6 @@ pub struct BotOpt {
     #[structopt(long, env = "YOUTRACK_URL")]
     pub youtrack_url: String,
 
-    #[structopt(long, env = "YOUTRACK_TOKEN")]
-    pub youtrack_token: String,
-
     #[structopt(long, env = "BACKLOG_QUERY")]
     pub youtrack_backlog: String,
 
@@ -37,6 +34,9 @@ pub struct BotOpt {
 
     #[structopt(long, env = "YOUTRACK_CLIENTSECRET")]
     pub youtrack_client_secret: String,
+
+    #[structopt(long, env = "AUTH_CALLBACK_URL")]
+    pub auth_callback_url: String,
 }
 
 impl BotOpt {
@@ -68,7 +68,7 @@ impl BotOpt {
     }
 
     pub fn youtrack_api(&self) -> Result<YouTrack> {
-        YouTrack::new(self.youtrack_url.clone(), self.youtrack_token.clone()).map_err(|e| e.into())
+        YouTrack::new(self.youtrack_url.clone(), "".to_string()).map_err(|e| e.into())
     }
 
     pub fn oauth_client(&self) -> oauth2::basic::BasicClient {
@@ -84,8 +84,7 @@ impl BotOpt {
             Some(token_url),
         )
         .set_redirect_url(
-            RedirectUrl::new("http://127.0.0.1:5000/auth".to_string())
-                .expect("Invalid redirect url"),
+            RedirectUrl::new(self.auth_callback_url.clone()).expect("Invalid redirect url"),
         )
     }
 }

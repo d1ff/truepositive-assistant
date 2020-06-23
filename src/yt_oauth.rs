@@ -46,10 +46,8 @@ fn auth2(data: web::Data<AppState>, params: web::Query<AuthRequest>) -> HttpResp
     let html = format!(
         r#"<html>
         <head><title>OAuth2 Test</title></head>
-        <script>
-            window.close();
-        </script>
         <body>
+        <h1>You may close this window</h1>
         </body>
     </html>"#
     );
@@ -71,6 +69,6 @@ pub fn run(bot: Arc<Mutex<Box<Bot>>>) -> Result<Server> {
             .route("/auth", web::get().to(auth))
             .route("/auth2", web::get().to(auth2))
     })
-    .bind("127.0.0.1:5000")?
+    .bind("0.0.0.0:5000")?
     .run())
 }
