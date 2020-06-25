@@ -111,7 +111,13 @@ impl From<CallbackParams> for InlineKeyboardButton {
             CallbackParams::BacklogStop => "stop".to_string(),
             CallbackParams::BacklogNext(_) => "next".to_string(),
             CallbackParams::BacklogPrev(_) => "prev".to_string(),
-            CallbackParams::VoteForIssue(_, p) => format!("{} {}", emoji!("star2"), p.id),
+            CallbackParams::VoteForIssue(_, p) => {
+                if p.has_vote {
+                    format!("{} {}", emoji!("star2"), p.id)
+                } else {
+                    p.id.clone()
+                }
+            }
             CallbackParams::Invalid => panic!("Do not use in keyboard"),
         };
         let uuid = Uuid::new_v4();
@@ -135,7 +141,7 @@ fn extract_params(cb: &CallbackQuery) -> Option<CallbackParams> {
 
 pub struct Bot {
     api: Api,
-    yt: YouTrack,
+    youtrack_url: String,
     pub templates: Tera,
     pub yt_oauth: BasicClient,
     backlog_query: String,
@@ -146,6 +152,15 @@ pub struct Bot {
 unsafe impl Send for Bot {}
 
 use url::form_urlencoded::byte_serialize;
+
+fn markdown_escape(value: &Value, _: &HashMap<String, Value>) -> tera::Result<Value> {
+    let mut s = try_get_value!("escape_html", "value", String, value);
+    let escaped_chars = vec!['_', '*', '`', '['];
+    for c in escaped_chars {
+        s = s.replace(c, format!("\\{}", c).as_str())
+    }
+    Ok(Value::String(s))
+}
 
 impl Bot {
     pub fn new(opts: BotOpt) -> Result<Self> {
@@ -159,9 +174,10 @@ impl Bot {
         };
 
         templates.autoescape_on(vec!["html", ".sql"]);
+        templates.register_filter("markdown_escape", markdown_escape);
         Ok(Self {
             api: opts.telegram_api(),
-            yt: opts.youtrack_api()?,
+            youtrack_url: opts.youtrack_url.clone(),
             templates,
             backlog_query: byte_serialize(opts.youtrack_backlog.as_bytes()).collect(),
             yt_oauth: opts.oauth_client(),
@@ -176,9 +192,7 @@ impl Bot {
 
     pub async fn get_youtrack(&self, user: UserId) -> Option<YouTrack> {
         self.yt_tokens.get(&user).and_then(|token| {
-            let mut yt = self.yt.clone();
-            yt.set_token(token);
-            Some(yt)
+            Some(YouTrack::new(self.youtrack_url.clone(), token.to_string()).unwrap())
         })
     }
 
@@ -216,6 +230,8 @@ impl Bot {
                             if issues.len() > 0 {
                                 let mut context = Context::new();
                                 context.insert("issues", &issues);
+                                context.insert("skip", &params.skip);
+                                context.insert("youtrack_url", &self.youtrack_url);
                                 txt_msg =
                                     self.templates.render("issues_list.md", &context).unwrap();
                             }
@@ -223,11 +239,19 @@ impl Bot {
                             // TODO: check whether original message is from our bot
                             if msg.from.is_bot {
                                 self.api
-                                    .send(msg.edit_text(txt_msg).reply_markup(kb))
+                                    .send(
+                                        msg.edit_text(txt_msg)
+                                            .reply_markup(kb)
+                                            .parse_mode(ParseMode::Markdown),
+                                    )
                                     .await?;
                             } else {
                                 self.api
-                                    .send(msg.text_reply(txt_msg).reply_markup(kb))
+                                    .send(
+                                        msg.text_reply(txt_msg)
+                                            .reply_markup(kb)
+                                            .parse_mode(ParseMode::Markdown),
+                                    )
                                     .await?;
                             };
                         }
@@ -331,6 +355,7 @@ impl Bot {
                                     println!("{:#?}", headers);
                                     println!("{}", status);
                                     println!("{:?}", json);
+                                    // TODO: Handle 400 Bad Request
                                     self.fetch_issues(user, msg, b).await?;
                                 }
                                 Err(e) => {

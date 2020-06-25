@@ -6,6 +6,8 @@ extern crate error_chain;
 extern crate telegram_bot;
 #[macro_use]
 extern crate emojicons;
+#[macro_use]
+extern crate tera;
 
 use futures::StreamExt;
 use std::sync::{Arc, Mutex};
