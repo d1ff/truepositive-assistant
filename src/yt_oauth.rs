@@ -3,6 +3,7 @@ use super::errors::*;
 use actix_web::{dev::Server, middleware, web, App, HttpResponse, HttpServer};
 use serde::Deserialize;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tera::Context;
 
 use super::bot::Bot;
@@ -16,9 +17,15 @@ struct AppState {
 pub struct AuthRequest {
     pub access_token: String,
     pub token_type: String,
-    pub expires_in: String,
+    pub expires_in: u64,
     pub scope: String,
     pub state: String,
+}
+
+impl AuthRequest {
+    pub fn expires_in_duration(&self) -> Duration {
+        Duration::from_secs(self.expires_in)
+    }
 }
 
 fn auth(data: web::Data<AppState>) -> HttpResponse {

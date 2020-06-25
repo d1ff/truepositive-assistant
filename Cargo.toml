@@ -25,6 +25,9 @@ actix-web = "2.0.0"
 actix-rt = "1.0.0"
 oauth2 = { version = "3.0", features = ["futures-03"] }
 emojicons = "1.0"
+log = "0.4"
+env_logger = "0.7"
+ttl_cache = "0.5.1"
 
 [dependencies.tera]
 version = "1"

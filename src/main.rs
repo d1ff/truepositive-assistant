@@ -8,6 +8,8 @@ extern crate telegram_bot;
 extern crate emojicons;
 #[macro_use]
 extern crate tera;
+#[macro_use]
+extern crate log;
 
 use futures::StreamExt;
 use std::sync::{Arc, Mutex};
@@ -25,6 +27,7 @@ use opts::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let opt = BotOpt::from_args();
 
     let bot = Arc::new(Mutex::new(Box::new(
