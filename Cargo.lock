@@ -72,7 +72,7 @@ dependencies = [
  "percent-encoding 2.1.0",
  "pin-project",
  "rand 0.7.3",
- "regex",
+ "regex 1.3.9",
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
@@ -100,7 +100,7 @@ dependencies = [
  "bytestring",
  "http 0.2.1",
  "log 0.4.8",
- "regex",
+ "regex 1.3.9",
  "serde",
 ]
 
@@ -240,7 +240,7 @@ dependencies = [
  "mime 0.3.16",
  "net2",
  "pin-project",
- "regex",
+ "regex 1.3.9",
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
@@ -285,11 +285,20 @@ dependencies = [
 
 [[package]]
 name = "aho-corasick"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca972c2ea5f742bfce5687b9aef75506a764f61d37f8f649047846a9686ddb66"
+dependencies = [
+ "memchr 0.1.11",
+]
+
+[[package]]
+name = "aho-corasick"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8716408b8bc624ed7f65d223ddb9ac2d044c0547b6fa4b0d554f3a9540496ada"
 dependencies = [
- "memchr",
+ "memchr 2.3.3",
 ]
 
 [[package]]
@@ -463,7 +472,7 @@ version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31accafdb70df7871592c058eca3985b71104e15ac32f64706022c58867da931"
 dependencies = [
- "memchr",
+ "memchr 2.3.3",
 ]
 
 [[package]]
@@ -711,6 +720,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bb1f6b1ce1c140482ea30ddd3335fc0024ac7ee112895426e0a629a6c20adfe3"
 
 [[package]]
+name = "emojicons"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b02a2ed1928a6edd0825724b834d0a40baf7f942211897cb6a6ec217429263e8"
+dependencies = [
+ "phf",
+ "phf_codegen",
+ "regex 0.1.80",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -927,7 +947,7 @@ dependencies = [
  "futures-macro",
  "futures-sink",
  "futures-task",
- "memchr",
+ "memchr 2.3.3",
  "pin-project",
  "pin-utils",
  "proc-macro-hack",
@@ -976,11 +996,11 @@ version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ad1da430bd7281dde2576f44c84cc3f0f7b475e7202cd503042dff01a8c8120"
 dependencies = [
- "aho-corasick",
+ "aho-corasick 0.7.10",
  "bstr",
  "fnv",
  "log 0.4.8",
- "regex",
+ "regex 1.3.9",
 ]
 
 [[package]]
@@ -1247,10 +1267,10 @@ dependencies = [
  "globset",
  "lazy_static",
  "log 0.4.8",
- "memchr",
- "regex",
+ "memchr 2.3.3",
+ "regex 1.3.9",
  "same-file",
- "thread_local",
+ "thread_local 1.0.1",
  "walkdir",
  "winapi-util",
 ]
@@ -1393,6 +1413,15 @@ name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
+
+[[package]]
+name = "memchr"
+version = "0.1.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b629fb514376c675b98c1421e80b151d3817ac42d7c667717d282761418d20"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "memchr"
@@ -1893,7 +1922,7 @@ dependencies = [
  "error-chain",
  "idna 0.2.0",
  "lazy_static",
- "regex",
+ "regex 1.3.9",
  "url 2.1.1",
 ]
 
@@ -2076,15 +2105,34 @@ checksum = "2439c63f3f6139d1b57529d16bc3b8bb855230c8efcc5d3a896c8bea7c3b1e84"
 
 [[package]]
 name = "regex"
+version = "0.1.80"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fd4ace6a8cf7860714a2c2280d6c1f7e6a413486c13298bbc86fd3da019402f"
+dependencies = [
+ "aho-corasick 0.5.3",
+ "memchr 0.1.11",
+ "regex-syntax 0.3.9",
+ "thread_local 0.2.7",
+ "utf8-ranges",
+]
+
+[[package]]
+name = "regex"
 version = "1.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c3780fcf44b193bc4d09f36d2a3c87b251da4a046c87795a0d35f4f927ad8e6"
 dependencies = [
- "aho-corasick",
- "memchr",
- "regex-syntax",
- "thread_local",
+ "aho-corasick 0.7.10",
+ "memchr 2.3.3",
+ "regex-syntax 0.6.18",
+ "thread_local 1.0.1",
 ]
+
+[[package]]
+name = "regex-syntax"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9ec002c35e86791825ed294b50008eea9ddfc8def4420124fbc6b08db834957"
 
 [[package]]
 name = "regex-syntax"
@@ -2506,7 +2554,7 @@ dependencies = [
  "lazy_static",
  "pest",
  "pest_derive",
- "regex",
+ "regex 1.3.9",
  "serde",
  "serde_json",
 ]
@@ -2538,6 +2586,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "thread-id"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9539db560102d1cef46b8b78ce737ff0bb64e7e18d35b2a5688f7d097d0ff03"
+dependencies = [
+ "kernel32-sys",
+ "libc",
+]
+
+[[package]]
+name = "thread_local"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8576dbbfcaef9641452d5cf0df9b0e7eeab7694956dd33bb61515fb8f18cfdd5"
+dependencies = [
+ "thread-id",
 ]
 
 [[package]]
@@ -2604,7 +2671,7 @@ dependencies = [
  "iovec",
  "lazy_static",
  "libc",
- "memchr",
+ "memchr 2.3.3",
  "mio",
  "mio-uds",
  "pin-project-lite",
@@ -2904,6 +2971,7 @@ version = "0.1.0"
 dependencies = [
  "actix-rt",
  "actix-web",
+ "emojicons",
  "error-chain",
  "futures 0.3.5",
  "hyper 0.13.6",
@@ -3064,6 +3132,12 @@ dependencies = [
  "matches",
  "percent-encoding 2.1.0",
 ]
+
+[[package]]
+name = "utf8-ranges"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ca13c08c41c9c3e04224ed9ff80461d97e121589ff27c753a16cb10830ae0f"
 
 [[package]]
 name = "uuid"

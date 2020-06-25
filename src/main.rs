@@ -4,14 +4,16 @@ extern crate lazy_static;
 extern crate error_chain;
 #[macro_use]
 extern crate telegram_bot;
+#[macro_use]
+extern crate emojicons;
 
 use futures::StreamExt;
-use structopt::StructOpt;
-
 use std::sync::{Arc, Mutex};
+use structopt::StructOpt;
 
 mod bot;
 mod errors;
+mod models;
 mod opts;
 mod yt_oauth;
 

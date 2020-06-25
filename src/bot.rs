@@ -13,6 +13,7 @@ use uuid::Uuid;
 use youtrack_rs::client::{Executor, YouTrack};
 
 use super::errors::*;
+use super::models::*;
 use super::opts::*;
 
 lazy_static! {
@@ -64,7 +65,7 @@ pub enum CallbackParams {
     Invalid,
 }
 
-fn backlog_keyboard(issues: &Vec<Issue>, params: &BacklogParams) -> InlineKeyboardMarkup {
+fn backlog_keyboard(issues: &Issues, params: &BacklogParams) -> InlineKeyboardMarkup {
     let mut kb = InlineKeyboardMarkup::new();
     let mut row: Vec<InlineKeyboardButton> = Vec::new();
 
@@ -110,7 +111,7 @@ impl From<CallbackParams> for InlineKeyboardButton {
             CallbackParams::BacklogStop => "stop".to_string(),
             CallbackParams::BacklogNext(_) => "next".to_string(),
             CallbackParams::BacklogPrev(_) => "prev".to_string(),
-            CallbackParams::VoteForIssue(_, p) => p.id.clone(),
+            CallbackParams::VoteForIssue(_, p) => format!("{} {}", emoji!("star2"), p.id),
             CallbackParams::Invalid => panic!("Do not use in keyboard"),
         };
         let uuid = Uuid::new_v4();
@@ -132,25 +133,10 @@ fn extract_params(cb: &CallbackQuery) -> Option<CallbackParams> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct IssueVoters {
-    #[serde(alias = "hasVote")]
-    has_vote: bool,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Issue {
-    #[serde(alias = "idReadable")]
-    id_readable: String,
-    summary: String,
-    votes: i32,
-    voters: IssueVoters,
-}
-
 pub struct Bot {
     api: Api,
     yt: YouTrack,
-    templates: Tera,
+    pub templates: Tera,
     pub yt_oauth: BasicClient,
     backlog_query: String,
     csrf_tokens: HashMap<String, UserId>,
@@ -217,7 +203,7 @@ impl Bot {
                     .top(params.top.to_string().as_str())
                     .skip(params.skip.to_string().as_str())
                     .fields("idReadable,summary,votes,voters(hasVote)")
-                    .execute::<Vec<Issue>>();
+                    .execute::<Issues>();
 
                 match issues {
                     Ok((headers, status, json)) => {
