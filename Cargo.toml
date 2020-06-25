@@ -8,26 +8,26 @@ edition = "2018"
 
 [dependencies]
 telegram-bot = { version = "0.7", features=["openssl"] }
-tokio = { version = "0.2", features = ["fs"] }
+tokio = { version = "0.2", features = ["rt-core", "macros", "rt-util"] }
 futures = "0.3"
 hyper = "0.13"
 hyper-tls = "0.4"
-hyper-socks2 = "0.4.3"
-url = "2.1.1"
-structopt = "0.3.15"
-serde_json = "1.0.39"
-serde = "1.0.39"
-lazy_static = "1.4.0"
-lru = "0.5.2"
+hyper-socks2 = "0.4"
+url = "2.1"
+structopt = "0.3"
+serde_json = "1.0"
+serde = "1.0"
+lazy_static = "1.4"
+lru = "0.5"
 uuid = { version = "0.8", features = ["serde", "v4"] }
-error-chain = "0.12.2"
-actix-web = "2.0.0"
-actix-rt = "1.0.0"
+error-chain = "0.12"
+actix-web = "2.0"
+actix-rt = "1.0"
 oauth2 = { version = "3.0", features = ["futures-03"] }
 emojicons = "1.0"
 log = "0.4"
 env_logger = "0.7"
-ttl_cache = "0.5.1"
+ttl_cache = "0.5"
 
 [dependencies.tera]
 version = "1"
@@ -37,6 +37,3 @@ default-features = false
 version = "0.1.1"
 default-features = false
 features = ["rust-native-tls"]
-
-[dev-dependencies]
-tokio = { version = "0.2", features = ["macros", "rt-util"] }

@@ -14,6 +14,7 @@ extern crate log;
 use futures::StreamExt;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
+use tokio::prelude::*;
 
 mod bot;
 mod errors;
