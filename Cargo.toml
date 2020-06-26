@@ -37,6 +37,7 @@ default-features = false
 version = "0.2"
 default-features = false
 features = ["rust-native-tls"]
+git = "https://github.com/d1ff/youtrack-rs"
 
 [profile.release]
 lto = true

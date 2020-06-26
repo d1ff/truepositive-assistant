@@ -3020,9 +3020,9 @@ dependencies = [
 [[package]]
 name = "youtrack-rs"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18f55b3f68e8b2b0324034a754cadae4b253cba7a4be6eac6c8cdc839d827b35"
+source = "git+https://github.com/d1ff/youtrack-rs#918a570b68712fe0e28ef9f69d23380d23fe03ea"
 dependencies = [
+ "async-trait",
  "error-chain",
  "futures",
  "hyper",

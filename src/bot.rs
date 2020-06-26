@@ -211,7 +211,8 @@ impl Bot {
             .top(top.to_string().as_str())
             .skip(skip.to_string().as_str())
             .fields("idReadable,summary,votes,voters(hasVote)")
-            .execute::<Issues>()?;
+            .execute::<Issues>()
+            .await?;
 
         let (headers, status, issues) = issues;
 
@@ -363,7 +364,7 @@ impl Bot {
         let json_has_vote = json!({"hasVote": !has_vote});
         let i = yt.post(json_has_vote).issues();
         let i = i.id(id.as_str());
-        let i = i.voters().execute::<Value>()?;
+        let i = i.voters().execute::<Value>().await?;
 
         let (headers, status, json) = i;
         debug!("{:#?}", headers);
