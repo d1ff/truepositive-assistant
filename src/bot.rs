@@ -280,7 +280,7 @@ impl Bot {
                 warn!("No token found for user: {}", user);
                 self.api
                     .send(msg.text_reply(format!(
-                        "No valid access token founds, use /start command to login in youtrack"
+                        "No valid access token founds, use /login command to login in youtrack"
                     )))
                     .await?;
             }
@@ -288,7 +288,17 @@ impl Bot {
         Ok(())
     }
 
-    async fn handle_start(&mut self, msg: Message) -> Result<()> {
+    async fn handle_start(&self, msg: Message) -> Result<()> {
+        let mut context = Context::new();
+        context.insert("name", &msg.from.first_name);
+        let txt_msg = self.templates.render("start.md", &context).unwrap();
+        self.api
+            .send(msg.text_reply(txt_msg).parse_mode(ParseMode::Markdown))
+            .await?;
+
+        Ok(())
+    }
+    async fn handle_login(&mut self, msg: Message) -> Result<()> {
         // Generate youtrack url
         let (auth_url, csrf_token) = self
             .yt_oauth
@@ -299,10 +309,10 @@ impl Bot {
         self.csrf_tokens
             .insert(csrf_token.secret().clone(), msg.from.id);
         let kb = reply_markup!(inline_keyboard,
-            ["Login" url auth_url]);
+            ["Log into YouTrack" url auth_url]);
         self.api
             .send(
-                msg.text_reply(format!("Hello, {}", msg.from.first_name))
+                msg.text_reply("Use this button to launch login process in the browser")
                     .reply_markup(kb),
             )
             .await?;
@@ -339,6 +349,7 @@ impl Bot {
             match data.as_str() {
                 "/backlog" => self.list_backlog(message).await?,
                 "/start" => self.handle_start(message).await?,
+                "/login" => self.handle_login(message).await?,
                 _ => {
                     warn!("Unrecognized command: {:?}", message);
                 }
@@ -402,7 +413,7 @@ impl Bot {
                         },
                         None => {
                             warn!("No youtrack instance for user {}", user);
-                            self.api.send(msg.text_reply(format!("No valid access token founds, use /start command to login in youtrack"))).await?;
+                            self.api.send(msg.text_reply(format!("No valid access token founds, use /login command to login in youtrack"))).await?;
                         }
                     }
                 }
