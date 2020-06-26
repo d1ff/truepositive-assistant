@@ -23,7 +23,7 @@ uuid = { version = "0.8", features = ["serde", "v4"] }
 error-chain = "0.12"
 actix-web = "2.0"
 actix-rt = "1.0"
-oauth2 = { version = "3.0", features = ["futures-03"] }
+oauth2 = { git = "https://github.com/ramosbugs/oauth2-rs", branch = "main", features = ["futures-03"] }
 emojicons = "1.0"
 log = "0.4"
 env_logger = "0.7"
@@ -34,6 +34,10 @@ version = "1"
 default-features = false
 
 [dependencies.youtrack-rs]
-version = "0.1.1"
+version = "0.2"
 default-features = false
 features = ["rust-native-tls"]
+
+[profile.release]
+lto = true
+codegen-units = 1
