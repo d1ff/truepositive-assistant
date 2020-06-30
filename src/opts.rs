@@ -1,6 +1,6 @@
 use hyper::Client;
+use hyper_rustls::HttpsConnector;
 use hyper_socks2::{Auth, SocksConnector};
-use hyper_tls::HttpsConnector;
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use structopt::StructOpt;
