@@ -35,9 +35,9 @@ fn auth(data: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().body(html.unwrap())
 }
 
-fn auth2(data: web::Data<AppState>, params: web::Query<AuthRequest>) -> HttpResponse {
+async fn auth2(data: web::Data<AppState>, params: web::Query<AuthRequest>) -> HttpResponse {
     let mut bot = data.bot.lock().unwrap();
-    bot.on_auth(params.clone());
+    bot.on_auth(params.clone()).await;
 
     let context = Context::new();
     let html = bot.templates.render("auth2.html", &context);

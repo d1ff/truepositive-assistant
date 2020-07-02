@@ -142,12 +142,12 @@ fn extract_params(cb: &CallbackQuery) -> Option<CallbackParams> {
 
 pub struct Bot {
     api: Api,
-    youtrack_url: String,
+    yt: YouTrack,
     pub templates: Tera,
     pub yt_oauth: BasicClient,
     backlog_query: String,
     csrf_tokens: HashMap<String, UserId>,
-    yt_tokens: TtlCache<UserId, String>,
+    yt_tokens: TtlCache<UserId, YouTrack>,
 }
 
 unsafe impl Send for Bot {}
@@ -178,7 +178,7 @@ impl Bot {
         templates.register_filter("markdown_escape", markdown_escape);
         Ok(Self {
             api: opts.telegram_api(),
-            youtrack_url: opts.youtrack_url.clone(),
+            yt: opts.youtrack_api()?,
             templates,
             backlog_query: byte_serialize(opts.youtrack_backlog.as_bytes()).collect(),
             yt_oauth: opts.oauth_client(),
@@ -191,10 +191,8 @@ impl Bot {
         self.api.stream()
     }
 
-    pub async fn get_youtrack(&self, user: UserId) -> Option<YouTrack> {
-        self.yt_tokens.get(&user).and_then(|token| {
-            Some(YouTrack::new(self.youtrack_url.clone(), token.to_string()).unwrap())
-        })
+    pub async fn get_youtrack(&self, user: UserId) -> Option<&YouTrack> {
+        self.yt_tokens.get(&user)
     }
 
     pub async fn list_backlog(&self, message: Message) -> Result<()> {
@@ -203,7 +201,7 @@ impl Bot {
         Ok(())
     }
 
-    async fn _fetch_issues(&self, yt: YouTrack, top: i32, skip: i32) -> Result<Issues> {
+    async fn _fetch_issues(&self, yt: &YouTrack, top: i32, skip: i32) -> Result<Issues> {
         let issues = yt
             .get()
             .issues()
@@ -246,7 +244,7 @@ impl Bot {
                             let mut context = Context::new();
                             context.insert("issues", &issues);
                             context.insert("skip", &params.skip);
-                            context.insert("youtrack_url", &self.youtrack_url);
+                            context.insert("youtrack_url", &self.yt.get_uri());
                             txt_msg = self.templates.render("issues_list.md", &context).unwrap();
                         }
 
@@ -321,15 +319,26 @@ impl Bot {
         Ok(())
     }
 
-    pub fn on_auth(&mut self, params: super::yt_oauth::AuthRequest) {
+    pub async fn on_auth(&mut self, params: super::yt_oauth::AuthRequest) {
         match self.csrf_tokens.get(&params.state) {
             Some(user_id) => {
                 info!("Saving token for: {}", user_id);
-                self.yt_tokens.insert(
-                    user_id.clone(),
-                    params.access_token.clone(),
-                    params.expires_in_duration(),
-                );
+                let mut yt = self.yt.clone();
+                yt.set_token(params.access_token.clone());
+
+                let me = yt.get().users().me().fields("fullName").execute::<Value>();
+
+                match me.await {
+                    Ok((_, _, v)) => {
+                        let me = v.unwrap();
+
+                        self.yt_tokens
+                            .insert(user_id.clone(), yt, params.expires_in_duration());
+                        self.api
+                            .spawn(user_id.text(format!("Hello, {}!", me["fullName"])));
+                    }
+                    Err(e) => warn!("YouTrack API request failed: {}", e),
+                }
             }
             None => {
                 warn!("No csrf token!");
@@ -360,7 +369,7 @@ impl Bot {
         Ok(())
     }
 
-    async fn vote_for_issue(&self, yt: YouTrack, has_vote: bool, id: String) -> Result<bool> {
+    async fn vote_for_issue(&self, yt: &YouTrack, has_vote: bool, id: String) -> Result<bool> {
         let json_has_vote = json!({"hasVote": !has_vote});
         let i = yt.post(json_has_vote).issues();
         let i = i.id(id.as_str());
