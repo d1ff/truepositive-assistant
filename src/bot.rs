@@ -112,9 +112,13 @@ impl Bot {
         self.yt_tokens.get(&user)
     }
 
-    pub async fn list_backlog(&self, message: &Message, b: &BacklogParams) -> Result<()> {
+    pub async fn list_backlog(
+        &self,
+        message: &Message,
+        b: &BacklogParams,
+    ) -> Result<UserStateMessages> {
         self.fetch_issues(message.from.id, message, b).await?;
-        Ok(())
+        Ok(UserStateMessages::StartBacklog(StartBacklog(b.clone())))
     }
 
     async fn _fetch_issues(&self, yt: &YouTrack, top: i32, skip: i32) -> Result<Issues> {
@@ -200,7 +204,7 @@ impl Bot {
         Ok(())
     }
 
-    async fn handle_start(&self, msg: &Message) -> Result<()> {
+    async fn handle_start(&self, msg: &Message) -> Result<UserStateMessages> {
         let mut context = Context::new();
         context.insert("name", &msg.from.first_name);
         let txt_msg = self.templates.render("start.md", &context).unwrap();
@@ -208,10 +212,10 @@ impl Bot {
             .send(msg.text_reply(txt_msg).parse_mode(ParseMode::Markdown))
             .await?;
 
-        Ok(())
+        Ok(UserStateMessages::Noop(Noop {}))
     }
 
-    async fn handle_login(&mut self, msg: &Message) -> Result<()> {
+    async fn handle_login(&mut self, msg: &Message) -> Result<UserStateMessages> {
         // Generate youtrack url
         let (auth_url, csrf_token) = self
             .yt_oauth
@@ -230,7 +234,7 @@ impl Bot {
             )
             .await?;
 
-        Ok(())
+        Ok(UserStateMessages::Noop(Noop {}))
     }
 
     pub async fn on_auth(&mut self, params: super::yt_oauth::AuthRequest) {
@@ -301,12 +305,12 @@ impl Bot {
     }
 
     async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
-        match &state {
+        let state_cmd: UserStateMessages = match &state {
             UserState::Idle(..) => match &cmd {
                 BotCommand::Backlog(msg, p) => self.list_backlog(msg, p).await?,
                 BotCommand::Start(msg) => self.handle_start(msg).await?,
                 BotCommand::Login(msg) => self.handle_login(msg).await?,
-                _ => {}
+                _ => UserStateMessages::Noop(Noop {}),
             },
             UserState::InBacklog(state) => match &cmd {
                 BotCommand::BacklogStop(cb) => {
@@ -314,10 +318,12 @@ impl Bot {
                     self.api
                         .send(msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))))
                         .await?;
+                    UserStateMessages::StopBacklog(StopBacklog {})
                 }
                 BotCommand::BacklogNext(cb, p) | BotCommand::BacklogPrev(cb, p) => {
                     let msg = cb.message.clone().unwrap();
                     self.fetch_issues(cb.from.id, &msg, p).await?;
+                    UserStateMessages::BacklogPage(BacklogPage(p.clone()))
                 }
                 BotCommand::BacklogVoteForIssue(cb, p) => {
                     let msg = cb.message.clone().unwrap();
@@ -331,24 +337,30 @@ impl Bot {
                                     &BacklogParams::new_with_skip(state.top, state.skip),
                                 )
                                 .await?;
+                                UserStateMessages::Noop(Noop {})
                             }
                             Err(e) => {
                                 warn!("Error occured: {}", e);
                                 self.api
-                                    .spawn(msg.text_reply(format!("Error occured: {}", e)))
+                                    .spawn(msg.text_reply(format!("Error occured: {}", e)));
+                                UserStateMessages::Noop(Noop {})
                             }
                         },
                         None => {
                             warn!("No youtrack instance for user {}", user);
+                            self.api.spawn(
+                                msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))),
+                            );
                             self.api.spawn(msg.text_reply(format!("No valid access token founds, use /login command to login in youtrack")));
+                            UserStateMessages::StopBacklog(StopBacklog {})
                         }
                     }
                 }
-                _ => {}
+                _ => UserStateMessages::Noop(Noop {}),
             },
-            _ => {}
-        }
-        Ok(state.execute(UserStateMessages::BotCommand(cmd)))
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(state.execute(state_cmd))
     }
 
     pub async fn dispatch_update(&mut self, update: Update) -> Result<()> {

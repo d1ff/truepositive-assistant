@@ -1,6 +1,18 @@
-use crate::commands::BotCommand;
+use crate::commands::BacklogParams;
 
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StartBacklog(pub BacklogParams);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BacklogPage(pub BacklogParams);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StopBacklog;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Noop;
 
 machine!(
     #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -11,27 +23,36 @@ machine!(
 );
 
 transitions!(UserState, [
-    (Idle, BotCommand) => [InBacklog, Idle],
-    (InBacklog, BotCommand) => [InBacklog, Idle]
+    (Idle, StartBacklog) => InBacklog,
+    (InBacklog, StopBacklog) => Idle,
+    (InBacklog, BacklogPage) => InBacklog,
+    (Idle, Noop) => Idle
 ]);
 
 impl Idle {
-    pub fn on_bot_command(&self, cmd: BotCommand) -> UserState {
-        match cmd {
-            BotCommand::Backlog(_, p) => UserState::in_backlog(p.top, p.skip),
-            _ => UserState::idle(),
+    pub fn on_start_backlog(&self, m: StartBacklog) -> InBacklog {
+        let StartBacklog(p) = m;
+        InBacklog {
+            top: p.top,
+            skip: p.skip,
         }
+    }
+
+    pub fn on_noop(&self, _: Noop) -> Idle {
+        Idle {}
     }
 }
 
 impl InBacklog {
-    pub fn on_bot_command(&self, cmd: BotCommand) -> UserState {
-        match cmd {
-            BotCommand::BacklogStop(_) => UserState::idle(),
-            BotCommand::BacklogNext(_, p) | BotCommand::BacklogPrev(_, p) => {
-                UserState::in_backlog(p.top, p.skip)
-            }
-            _ => UserState::in_backlog(self.top, self.skip),
+    pub fn on_stop_backlog(&self, _: StopBacklog) -> Idle {
+        Idle {}
+    }
+
+    pub fn on_backlog_page(&self, p: BacklogPage) -> InBacklog {
+        let BacklogPage(p) = p;
+        InBacklog {
+            top: p.top,
+            skip: p.skip,
         }
     }
 }
