@@ -1,6 +1,6 @@
 [package]
 name = "truepositive-assistant"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Vladislav Bortnikov <bortnikov.vladislav@e-sakha.ru>"]
 edition = "2018"
 
@@ -28,6 +28,7 @@ emojicons = "1.0"
 log = "0.4"
 env_logger = "0.7"
 ttl_cache = "0.5"
+machine = "^0.2"
 
 [dependencies.tera]
 version = "1"

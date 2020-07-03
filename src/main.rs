@@ -10,15 +10,19 @@ extern crate emojicons;
 extern crate tera;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate machine;
 
 use futures::StreamExt;
 use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 
 mod bot;
+mod commands;
 mod errors;
 mod models;
 mod opts;
+mod states;
 mod yt_oauth;
 
 use bot::*;
