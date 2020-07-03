@@ -1,6 +1,4 @@
 #[macro_use]
-extern crate lazy_static;
-#[macro_use]
 extern crate error_chain;
 #[macro_use]
 extern crate telegram_bot;
@@ -48,7 +46,10 @@ async fn main() -> Result<()> {
         let update = update?;
         {
             let mut bot = bot.lock().unwrap();
-            bot.dispatch_update(update).await?;
+            let res = bot.dispatch_update(update).await;
+            if let Err(e) = res {
+                warn!("Error occured: {}", e);
+            }
         }
     }
 

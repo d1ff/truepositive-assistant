@@ -90,7 +90,7 @@ impl From<CallbackParams> for InlineKeyboardButton {
 #[derive(Clone, Debug, PartialEq)]
 pub enum BotCommand {
     Start(Message),
-    Backlog(Message),
+    Backlog(Message, BacklogParams),
     Login(Message),
     BacklogStop(CallbackQuery),
     BacklogNext(CallbackQuery, BacklogParams),
@@ -111,7 +111,7 @@ impl TryFrom<Message> for BotCommand {
                 data
             );
             match data.as_str() {
-                "/backlog" => Ok(BotCommand::Backlog(msg)),
+                "/backlog" => Ok(BotCommand::Backlog(msg, BacklogParams::new(5))),
                 "/start" => Ok(BotCommand::Start(msg)),
                 "/login" => Ok(BotCommand::Login(msg)),
                 _ => bail!("Unsupported command"),

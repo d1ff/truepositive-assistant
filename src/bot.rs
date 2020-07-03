@@ -1,5 +1,7 @@
 use oauth2::basic::BasicClient;
 use oauth2::{CsrfToken, Scope};
+use redis;
+use redis::Commands;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -61,7 +63,7 @@ pub struct Bot {
     backlog_query: String,
     csrf_tokens: HashMap<String, UserId>,
     yt_tokens: TtlCache<UserId, YouTrack>,
-    states: HashMap<UserId, UserState>,
+    redis: redis::Client,
 }
 
 unsafe impl Send for Bot {}
@@ -98,7 +100,7 @@ impl Bot {
             yt_oauth: opts.oauth_client(),
             csrf_tokens: HashMap::new(),
             yt_tokens: TtlCache::new(100),
-            states: HashMap::new(),
+            redis: redis::Client::open(opts.redis_url)?,
         })
     }
 
@@ -110,9 +112,8 @@ impl Bot {
         self.yt_tokens.get(&user)
     }
 
-    pub async fn list_backlog(&self, message: &Message) -> Result<()> {
-        self.fetch_issues(message.from.id, message, BacklogParams::new(5))
-            .await?;
+    pub async fn list_backlog(&self, message: &Message, b: &BacklogParams) -> Result<()> {
+        self.fetch_issues(message.from.id, message, b).await?;
         Ok(())
     }
 
@@ -146,7 +147,7 @@ impl Bot {
         &self,
         user: UserId,
         msg: &Message,
-        params: BacklogParams,
+        params: &BacklogParams,
     ) -> Result<()> {
         match self.get_youtrack(user).await {
             Some(yt) => {
@@ -185,18 +186,15 @@ impl Bot {
                     Err(e) => {
                         warn!("Error occured: {}", e);
                         self.api
-                            .send(msg.text_reply(format!("Error occured: {}", e)))
-                            .await?;
+                            .spawn(msg.text_reply(format!("Error occured: {}", e)));
                     }
                 };
             }
             None => {
                 warn!("No token found for user: {}", user);
-                self.api
-                    .send(msg.text_reply(format!(
-                        "No valid access token founds, use /login command to login in youtrack"
-                    )))
-                    .await?;
+                self.api.spawn(msg.text_reply(format!(
+                    "No valid access token founds, use /login command to login in youtrack"
+                )));
             }
         }
         Ok(())
@@ -283,8 +281,13 @@ impl Bot {
         Ok(!has_vote)
     }
 
-    fn get_state(&mut self, uid: UserId) -> &mut UserState {
-        self.states.entry(uid).or_insert(UserState::idle())
+    fn get_state(&mut self, uid: UserId) -> Result<UserState> {
+        let mut con = self.redis.get_connection()?;
+        let key = format!("state:{}", uid);
+        match con.get(key)? {
+            Some(state) => Ok(state),
+            None => Ok(UserState::idle()),
+        }
     }
 
     fn get_state_by_update(&mut self, update: &Update) -> Result<(UserId, UserState)> {
@@ -293,13 +296,14 @@ impl Bot {
             UpdateKind::CallbackQuery(cb) => cb.from.id,
             _ => bail!("Unsupported update type"),
         };
-        Ok((uid, self.get_state(uid).clone()))
+        let state = self.get_state(uid)?;
+        Ok((uid, state))
     }
 
     async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
         match &state {
             UserState::Idle(..) => match &cmd {
-                BotCommand::Backlog(msg) => self.list_backlog(msg).await?,
+                BotCommand::Backlog(msg, p) => self.list_backlog(msg, p).await?,
                 BotCommand::Start(msg) => self.handle_start(msg).await?,
                 BotCommand::Login(msg) => self.handle_login(msg).await?,
                 _ => {}
@@ -313,7 +317,7 @@ impl Bot {
                 }
                 BotCommand::BacklogNext(cb, p) | BotCommand::BacklogPrev(cb, p) => {
                     let msg = cb.message.clone().unwrap();
-                    self.fetch_issues(cb.from.id, &msg, p.clone()).await?;
+                    self.fetch_issues(cb.from.id, &msg, p).await?;
                 }
                 BotCommand::BacklogVoteForIssue(cb, p) => {
                     let msg = cb.message.clone().unwrap();
@@ -324,20 +328,19 @@ impl Bot {
                                 self.fetch_issues(
                                     user,
                                     &msg,
-                                    BacklogParams::new_with_skip(state.top, state.skip),
+                                    &BacklogParams::new_with_skip(state.top, state.skip),
                                 )
                                 .await?;
                             }
                             Err(e) => {
                                 warn!("Error occured: {}", e);
                                 self.api
-                                    .send(msg.text_reply(format!("Error occured: {}", e)))
-                                    .await?;
+                                    .spawn(msg.text_reply(format!("Error occured: {}", e)))
                             }
                         },
                         None => {
                             warn!("No youtrack instance for user {}", user);
-                            self.api.send(msg.text_reply(format!("No valid access token founds, use /login command to login in youtrack"))).await?;
+                            self.api.spawn(msg.text_reply(format!("No valid access token founds, use /login command to login in youtrack")));
                         }
                     }
                 }
@@ -351,11 +354,14 @@ impl Bot {
     pub async fn dispatch_update(&mut self, update: Update) -> Result<()> {
         debug!("Got update: {:?}", update);
         let (uid, state) = self.get_state_by_update(&update)?;
+        debug!("UID: {}, STATE: {:?}", uid, state);
         let command: BotCommand = update.try_into()?;
 
         match self.handle_command(state, command.clone()).await {
             Ok(new_state) => {
-                self.states.insert(uid, new_state);
+                let mut con = self.redis.get_connection()?;
+                let key = format!("state:{}", uid);
+                con.set(key, new_state)?;
             }
             Err(e) => {
                 warn!("Could not handle command {:?}: {}", command, e);

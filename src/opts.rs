@@ -40,6 +40,9 @@ pub struct BotOpt {
 
     #[structopt(long, env = "AUTH_CALLBACK_URL")]
     pub auth_callback_url: String,
+
+    #[structopt(long, env = "REDIS_URL")]
+    pub redis_url: String,
 }
 
 impl BotOpt {

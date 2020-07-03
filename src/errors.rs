@@ -10,6 +10,7 @@ error_chain! {
         Telegram(::telegram_bot::Error);
         Io(::std::io::Error);
         JsonError(::serde_json::error::Error);
+        RedisError(::redis::RedisError);
     }
 
 }
