@@ -283,9 +283,8 @@ impl Bot {
         Ok(!has_vote)
     }
 
-    fn get_state(&mut self, uid: &UserId) -> UserState {
-        let idle = UserState::idle();
-        self.states.get(uid).unwrap_or(&idle).clone()
+    fn get_state(&mut self, uid: UserId) -> &mut UserState {
+        self.states.entry(uid).or_insert(UserState::idle())
     }
 
     fn get_state_by_update(&mut self, update: &Update) -> Result<(UserId, UserState)> {
@@ -294,7 +293,7 @@ impl Bot {
             UpdateKind::CallbackQuery(cb) => cb.from.id,
             _ => bail!("Unsupported update type"),
         };
-        Ok((uid, self.get_state(&uid)))
+        Ok((uid, self.get_state(uid).clone()))
     }
 
     async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
@@ -346,7 +345,7 @@ impl Bot {
             },
             _ => {}
         }
-        Ok(state.on_bot_command(cmd))
+        Ok(state.execute(UserStateMessages::BotCommand(cmd)))
     }
 
     pub async fn dispatch_update(&mut self, update: Update) -> Result<()> {

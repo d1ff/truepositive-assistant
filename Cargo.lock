@@ -1349,9 +1349,9 @@ dependencies = [
 
 [[package]]
 name = "machine"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55fee1f65bb12ec19da7fcf8b31394bc5698ce38f20e49d3a8ebf4e4416d3b35"
+checksum = "a52fd06b3f90cd4a538e2fe0257ef8ddb4e207c33a2c6b5712d722c0ccd171df"
 dependencies = [
  "case",
  "log 0.4.8",
@@ -2756,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "truepositive-assistant"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "actix-rt",
  "actix-web",
