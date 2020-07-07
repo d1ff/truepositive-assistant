@@ -30,6 +30,7 @@ env_logger = "0.7"
 ttl_cache = "0.5"
 machine = "^0.3"
 redis = "0.16"
+paste = "0.1"
 
 [dependencies.tera]
 version = "1"

@@ -237,6 +237,17 @@ impl Bot {
         Ok(UserStateMessages::Noop(Noop {}))
     }
 
+    async fn handle_new_issue(&self, msg: &Message) -> Result<UserStateMessages> {
+        let kb = reply_markup!(force_reply);
+        self.api
+            .send(
+                msg.text_reply("Creating new issue. Please, enter issue summary.")
+                    .reply_markup(kb),
+            )
+            .await?;
+        Ok(UserStateMessages::CreateNewIssue(CreateNewIssue {}))
+    }
+
     pub async fn on_auth(&mut self, params: super::yt_oauth::AuthRequest) {
         match self.csrf_tokens.get(&params.state) {
             Some(user_id) => {
@@ -310,6 +321,7 @@ impl Bot {
                 BotCommand::Backlog(msg, p) => self.list_backlog(msg, p).await?,
                 BotCommand::Start(msg) => self.handle_start(msg).await?,
                 BotCommand::Login(msg) => self.handle_login(msg).await?,
+                BotCommand::NewIssue(msg) => self.handle_new_issue(msg).await?,
                 _ => UserStateMessages::Noop(Noop {}),
             },
             UserState::InBacklog(state) => match &cmd {
@@ -355,6 +367,150 @@ impl Bot {
                             UserStateMessages::StopBacklog(StopBacklog {})
                         }
                     }
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssue(state) => match &cmd {
+                BotCommand::Text(msg) => {
+                    if let Some(summary) = cmd.get_message_text() {
+                        let kb = reply_markup!(
+                            reply_keyboard,
+                            selective,
+                            one_time,
+                            resize,
+                            ["Project 1", "Project 2"]
+                        );
+                        self.api.spawn(
+                            msg.from
+                                .text(format!("Got it. Now select project for the issue."))
+                                .reply_markup(kb),
+                        );
+                        state.summary(summary)
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssueSummary(state) => match &cmd {
+                BotCommand::Text(msg) => {
+                    if let Some(project) = cmd.get_message_text() {
+                        let kb = reply_markup!(
+                            reply_keyboard,
+                            selective,
+                            one_time,
+                            resize,
+                            ["SLA", "Presale", "Plan"]
+                        );
+                        self.api.spawn(
+                            msg.from
+                                .text("Got it. Now select stream for the issue")
+                                .reply_markup(kb),
+                        );
+                        state.project(project)
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssueSummaryProject(state) => match &cmd {
+                BotCommand::Text(msg) => {
+                    if let Some(stream) = cmd.get_message_text() {
+                        // TODO: parse stream
+                        let kb = reply_markup!(
+                            reply_keyboard,
+                            selective,
+                            one_time,
+                            resize,
+                            ["Task", "Bug", "Researh"]
+                        );
+                        self.api.spawn(
+                            msg.from
+                                .text("Got it. Now select issue type.")
+                                .reply_markup(kb),
+                        );
+
+                        state.stream(IssueStream::Plan {})
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssueSummaryProjectStream(state) => match &cmd {
+                BotCommand::Text(msg) => {
+                    if let Some(_issue_type) = cmd.get_message_text() {
+                        // TODO: parse type
+                        //
+                        self.api
+                            .spawn(msg.from.text("Got it. Now type in issue description."));
+
+                        state.issue_type(IssueType::Plan {})
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssueSummaryProjectStreamType(state) => match &cmd {
+                BotCommand::Text(msg) => {
+                    if let Some(desc) = cmd.get_message_text() {
+                        let kb = reply_markup!(
+                            reply_keyboard,
+                            selective,
+                            one_time,
+                            resize,
+                            ["/save", "/cancel"]
+                        );
+
+                        let mut context = Context::new();
+                        context.insert("issue", &state);
+                        context.insert("desc", &desc);
+                        let txt_msg = self.templates.render("new_issue.md", &context).unwrap();
+
+                        self.api.spawn(
+                            msg.from
+                                .text(txt_msg)
+                                .reply_markup(kb)
+                                .parse_mode(ParseMode::Markdown),
+                        );
+                        state.desc(desc)
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
+                }
+                _ => UserStateMessages::Noop(Noop {}),
+            },
+            UserState::NewIssueSummaryProjectStreamTypeDesc(_state) => match &cmd {
+                BotCommand::Save(msg) => {
+                    self.api.spawn(msg.from.text("save"));
+                    // TODO: save issue
+                    UserStateMessages::Save(Save {})
+                }
+                BotCommand::Cancel(msg) => {
+                    self.api.spawn(msg.from.text("cancel"));
+                    UserStateMessages::Cancel(Cancel {})
                 }
                 _ => UserStateMessages::Noop(Noop {}),
             },

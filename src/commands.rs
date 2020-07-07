@@ -92,10 +92,30 @@ pub enum BotCommand {
     Start(Message),
     Backlog(Message, BacklogParams),
     Login(Message),
+    Stop(Message),
+    Text(Message),
+    NewIssue(Message),
     BacklogStop(CallbackQuery),
     BacklogNext(CallbackQuery, BacklogParams),
     BacklogPrev(CallbackQuery, BacklogParams),
     BacklogVoteForIssue(CallbackQuery, VoteForIssueParams),
+    Save(Message),
+    Cancel(Message),
+}
+
+impl BotCommand {
+    pub fn get_message_text(&self) -> Option<String> {
+        match self {
+            BotCommand::Text(msg) => {
+                if let MessageKind::Text { ref data, .. } = msg.kind {
+                    Some(data.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 impl TryFrom<Message> for BotCommand {
@@ -110,12 +130,17 @@ impl TryFrom<Message> for BotCommand {
                 &msg.chat.id(),
                 data
             );
-            match data.as_str() {
-                "/backlog" => Ok(BotCommand::Backlog(msg, BacklogParams::new(5))),
-                "/start" => Ok(BotCommand::Start(msg)),
-                "/login" => Ok(BotCommand::Login(msg)),
-                _ => bail!("Unsupported command"),
-            }
+            let cmd = match data.as_str() {
+                "/backlog" => BotCommand::Backlog(msg, BacklogParams::new(5)),
+                "/start" => BotCommand::Start(msg),
+                "/login" => BotCommand::Login(msg),
+                "/stop" => BotCommand::Stop(msg),
+                "/new_issue" => BotCommand::NewIssue(msg),
+                "/save" => BotCommand::Save(msg),
+                "/cancel" => BotCommand::Cancel(msg),
+                _ => BotCommand::Text(msg),
+            };
+            Ok(cmd)
         } else {
             bail!("Unsupported message kind")
         }

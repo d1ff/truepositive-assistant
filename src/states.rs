@@ -12,13 +12,102 @@ pub struct BacklogPage(pub BacklogParams);
 pub struct StopBacklog;
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct Save;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cancel;
+
+macro_rules! on_cancel {
+    () => {
+        pub fn on_cancel(&self, _: Cancel) -> Idle {
+            Idle {}
+        }
+    };
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Noop;
+
+macro_rules! on_noop {
+    () => {
+        pub fn on_noop(&self, _: Noop) -> Self {
+            self.clone()
+        }
+    };
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CreateNewIssue;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssueSummary(pub String);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssueSummaryProject(pub String, pub String);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum IssueStream {
+    Sla,
+    Presale,
+    Plan,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum IssueType {
+    Sla,
+    Presale,
+    Plan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssueSummaryProjectStream(pub String, pub String, pub IssueStream);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssueSummaryProjectStreamType(pub String, pub String, pub IssueStream, pub IssueType);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IssueSummaryProjectStreamTypeDesc(
+    pub String,
+    pub String,
+    pub IssueStream,
+    pub IssueType,
+    pub String,
+);
 
 machine!(
     #[derive(Clone, Debug, Deserialize, Serialize)]
     enum UserState {
         Idle,
-        InBacklog { pub top: i32, pub skip: i32 },
+        InBacklog {
+            pub top: i32,
+            pub skip: i32,
+        },
+        NewIssue,
+        NewIssueSummary {
+            pub summary: String,
+        },
+        NewIssueSummaryProject {
+            pub summary: String,
+            pub project: String,
+        },
+        NewIssueSummaryProjectStream {
+            pub summary: String,
+            pub project: String,
+            pub stream: IssueStream,
+        },
+        NewIssueSummaryProjectStreamType {
+            pub summary: String,
+            pub project: String,
+            pub stream: IssueStream,
+            pub issue_type: IssueType,
+        },
+        NewIssueSummaryProjectStreamTypeDesc {
+            pub summary: String,
+            pub project: String,
+            pub stream: IssueStream,
+            pub issue_type: IssueType,
+            pub desc: String,
+        },
     }
 );
 
@@ -26,7 +115,26 @@ transitions!(UserState, [
     (Idle, StartBacklog) => InBacklog,
     (InBacklog, StopBacklog) => Idle,
     (InBacklog, BacklogPage) => InBacklog,
-    (Idle, Noop) => Idle
+    (Idle, Noop) => Idle,
+    (Idle, CreateNewIssue) => NewIssue,
+    (NewIssue, IssueSummary) => NewIssueSummary,
+    (NewIssue, Cancel) => Idle,
+    (NewIssue, Noop) => NewIssue,
+    (NewIssueSummary, IssueSummaryProject) => NewIssueSummaryProject,
+    (NewIssueSummary, Cancel) => Idle,
+    (NewIssueSummary, Noop) => NewIssueSummary,
+    (NewIssueSummaryProject, IssueSummaryProjectStream) => NewIssueSummaryProjectStream,
+    (NewIssueSummaryProject, Cancel) => Idle,
+    (NewIssueSummaryProject, Noop) => NewIssueSummaryProject,
+    (NewIssueSummaryProjectStream, IssueSummaryProjectStreamType) => NewIssueSummaryProjectStreamType,
+    (NewIssueSummaryProjectStream, Cancel) => Idle,
+    (NewIssueSummaryProjectStream, Noop) => NewIssueSummaryProjectStream,
+    (NewIssueSummaryProjectStreamType, IssueSummaryProjectStreamTypeDesc) => NewIssueSummaryProjectStreamTypeDesc,
+    (NewIssueSummaryProjectStreamType, Cancel) => Idle,
+    (NewIssueSummaryProjectStreamType, Noop) => NewIssueSummaryProjectStreamType,
+    (NewIssueSummaryProjectStreamTypeDesc, Save) => Idle,
+    (NewIssueSummaryProjectStreamTypeDesc, Cancel) => Idle,
+    (NewIssueSummaryProjectStreamTypeDesc, Noop) => NewIssueSummaryProjectStreamTypeDesc
 ]);
 
 impl Idle {
@@ -38,9 +146,11 @@ impl Idle {
         }
     }
 
-    pub fn on_noop(&self, _: Noop) -> Idle {
-        Idle {}
+    pub fn on_create_new_issue(&self, _: CreateNewIssue) -> NewIssue {
+        NewIssue {}
     }
+
+    on_noop!();
 }
 
 impl InBacklog {
@@ -55,6 +165,94 @@ impl InBacklog {
             skip: p.skip,
         }
     }
+}
+
+macro_rules! on_issue_message {
+    ($msg:tt, $($f:ident),+) => {
+        paste::item! {
+            pub fn [<on_ $msg:snake>](&self, m: $msg) -> [<New $msg>] {
+                let $msg($($f),+) = m;
+                [<New $msg>] { $($f),+ }
+            }
+        }
+    };
+}
+
+macro_rules! make_forward {
+    ($msg:tt, $n:ident, $t:ty) => {
+        pub fn $n(&self, $n: $t) -> UserStateMessages {
+            UserStateMessages::$msg($msg($n))
+        }
+    };
+    ($msg:tt, $n:ident, $t:ty, $($f:ident),*) => {
+        pub fn $n(&self, $n: $t) -> UserStateMessages {
+            UserStateMessages::$msg($msg($(self.$f.clone()),*, $n))
+        }
+    };
+}
+
+macro_rules! impl_new_issue_state {
+    ($t:ty, $msg:tt, $n:ident, $nt:ty) => {
+        impl $t {
+            on_issue_message!($msg, $n);
+            on_cancel!();
+            on_noop!();
+            make_forward!($msg, $n, $nt);
+        }
+    };
+    ($t:ty, $msg:tt, $n:ident, $nt:ty, $($f:ident),*) => {
+        impl $t {
+            on_issue_message!($msg, $($f),*, $n);
+            on_cancel!();
+            on_noop!();
+            make_forward!($msg, $n, $nt, $($f),*);
+        }
+    };
+}
+
+impl_new_issue_state!(NewIssue, IssueSummary, summary, String);
+impl_new_issue_state!(
+    NewIssueSummary,
+    IssueSummaryProject,
+    project,
+    String,
+    summary
+);
+impl_new_issue_state!(
+    NewIssueSummaryProject,
+    IssueSummaryProjectStream,
+    stream,
+    IssueStream,
+    summary,
+    project
+);
+impl_new_issue_state!(
+    NewIssueSummaryProjectStream,
+    IssueSummaryProjectStreamType,
+    issue_type,
+    IssueType,
+    summary,
+    project,
+    stream
+);
+impl_new_issue_state!(
+    NewIssueSummaryProjectStreamType,
+    IssueSummaryProjectStreamTypeDesc,
+    desc,
+    String,
+    summary,
+    project,
+    stream,
+    issue_type
+);
+
+impl NewIssueSummaryProjectStreamTypeDesc {
+    pub fn on_save(&self, _: Save) -> Idle {
+        Idle {}
+    }
+
+    on_cancel!();
+    on_noop!();
 }
 
 impl redis::FromRedisValue for UserState {

@@ -10,6 +10,8 @@ extern crate tera;
 extern crate log;
 #[macro_use]
 extern crate machine;
+#[macro_use]
+extern crate paste;
 
 use futures::StreamExt;
 use std::sync::{Arc, Mutex};
