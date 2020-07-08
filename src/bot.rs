@@ -72,7 +72,7 @@ fn backlog_keyboard(issues: &Issues, params: &BacklogParams) -> InlineKeyboardMa
 macro_rules! match_user_state {
     ($s:ty, $var:ident, $($value:path),+) => {
         paste::expr! {
-            match $var {
+            match &$var {
                 $($s::$value(state) => self.[<handle_command_ $value:snake>](&state, cmd).await?),+,
                 $s::Error => self.handle_command_error(cmd).await?,
             }
@@ -660,10 +660,9 @@ impl Bot {
     }
 
     async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
-        let state_copy = state.clone();
         let state_cmd = match_user_state!(
             UserState,
-            state_copy,
+            state,
             Idle,
             InBacklog,
             NewIssue,
