@@ -1,7 +1,7 @@
 Please, review your issue:
 
 *Summary*: {{ issue.summary|markdown_escape }}
-*Project*: {{ issue.project }}
+*Project*: {{ issue.project.name }}
 *Stream*: {{ issue.stream }}
 *Type*: {{ issue.issue_type }}
 *Description*:

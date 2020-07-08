@@ -147,6 +147,19 @@ impl Bot {
         }
     }
 
+    async fn get_projects(&self) -> Result<Projects> {
+        Project::list(&self.yt).await
+    }
+
+    async fn get_project(&self, name: String) -> Result<Project> {
+        let projects = self.get_projects().await?;
+        let name = Some(name);
+        match projects.binary_search_by_key(&name, |p| p.name.clone()) {
+            Ok(r) => Ok(projects.get(r).unwrap().clone()),
+            Err(_) => bail!("No such project"),
+        }
+    }
+
     pub async fn fetch_issues(
         &self,
         user: UserId,
@@ -373,13 +386,17 @@ impl Bot {
             UserState::NewIssue(state) => match &cmd {
                 BotCommand::Text(msg) => {
                     if let Some(summary) = cmd.get_message_text() {
-                        let kb = reply_markup!(
-                            reply_keyboard,
-                            selective,
-                            one_time,
-                            resize,
-                            ["Project 1", "Project 2"]
-                        );
+                        let projects = self.get_projects().await?;
+                        let mut kb = ReplyKeyboardMarkup::new();
+                        kb.one_time_keyboard().resize_keyboard();
+
+                        for projects_chunk in projects.chunks(3) {
+                            let mut row: Vec<KeyboardButton> = Vec::new();
+                            for project in projects_chunk.iter() {
+                                row.push(KeyboardButton::new(project.name.clone().unwrap()));
+                            }
+                            kb.add_row(row);
+                        }
                         self.api.spawn(
                             msg.from
                                 .text(format!("Got it. Now select project for the issue."))
@@ -399,19 +416,29 @@ impl Bot {
             UserState::NewIssueSummary(state) => match &cmd {
                 BotCommand::Text(msg) => {
                     if let Some(project) = cmd.get_message_text() {
-                        let kb = reply_markup!(
-                            reply_keyboard,
-                            selective,
-                            one_time,
-                            resize,
-                            ["SLA", "Presale", "Plan"]
-                        );
-                        self.api.spawn(
-                            msg.from
-                                .text("Got it. Now select stream for the issue")
-                                .reply_markup(kb),
-                        );
-                        state.project(project)
+                        match self.get_project(project).await {
+                            Ok(project) => {
+                                let stream = project.streams(&self.yt).await?;
+
+                                let mut kb = ReplyKeyboardMarkup::new();
+                                kb.one_time_keyboard().resize_keyboard();
+
+                                for projects_chunk in stream.values.unwrap().chunks(3) {
+                                    let mut row: Vec<KeyboardButton> = Vec::new();
+                                    for project in projects_chunk.iter() {
+                                        row.push(KeyboardButton::new(project.name.clone()));
+                                    }
+                                    kb.add_row(row);
+                                }
+                                self.api.spawn(
+                                    msg.from
+                                        .text("Got it. Now select stream for the issue")
+                                        .reply_markup(kb),
+                                );
+                                state.project(project)
+                            }
+                            Err(_) => UserStateMessages::Noop(Noop {}),
+                        }
                     } else {
                         UserStateMessages::Noop(Noop {})
                     }
@@ -532,7 +559,7 @@ impl Bot {
                 con.set(key, new_state)?;
             }
             Err(e) => {
-                warn!("Could not handle command {:?}: {}", command, e);
+                warn!("Could not handle command: {}", e);
             }
         }
 

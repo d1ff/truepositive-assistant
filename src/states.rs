@@ -2,6 +2,8 @@ use crate::commands::BacklogParams;
 
 use serde::{Deserialize, Serialize};
 
+use crate::models::Project;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartBacklog(pub BacklogParams);
 
@@ -43,7 +45,7 @@ pub struct CreateNewIssue;
 pub struct IssueSummary(pub String);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct IssueSummaryProject(pub String, pub String);
+pub struct IssueSummaryProject(pub String, pub Project);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum IssueStream {
@@ -60,15 +62,15 @@ pub enum IssueType {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct IssueSummaryProjectStream(pub String, pub String, pub IssueStream);
+pub struct IssueSummaryProjectStream(pub String, pub Project, pub IssueStream);
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct IssueSummaryProjectStreamType(pub String, pub String, pub IssueStream, pub IssueType);
+pub struct IssueSummaryProjectStreamType(pub String, pub Project, pub IssueStream, pub IssueType);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IssueSummaryProjectStreamTypeDesc(
     pub String,
-    pub String,
+    pub Project,
     pub IssueStream,
     pub IssueType,
     pub String,
@@ -88,22 +90,22 @@ machine!(
         },
         NewIssueSummaryProject {
             pub summary: String,
-            pub project: String,
+            pub project: Project,
         },
         NewIssueSummaryProjectStream {
             pub summary: String,
-            pub project: String,
+            pub project: Project,
             pub stream: IssueStream,
         },
         NewIssueSummaryProjectStreamType {
             pub summary: String,
-            pub project: String,
+            pub project: Project,
             pub stream: IssueStream,
             pub issue_type: IssueType,
         },
         NewIssueSummaryProjectStreamTypeDesc {
             pub summary: String,
-            pub project: String,
+            pub project: Project,
             pub stream: IssueStream,
             pub issue_type: IssueType,
             pub desc: String,
@@ -215,7 +217,7 @@ impl_new_issue_state!(
     NewIssueSummary,
     IssueSummaryProject,
     project,
-    String,
+    Project,
     summary
 );
 impl_new_issue_state!(
