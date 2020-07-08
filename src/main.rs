@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
     let rt = tokio::task::LocalSet::new();
     let system = actix_rt::System::run_in_tokio("test", &rt);
-    let srv = yt_oauth::run(bot.clone()).unwrap();
+    let srv = yt_oauth::run(bot.clone(), opt.addr).unwrap();
 
     while let Some(update) = stream.next().await {
         let update = update?;

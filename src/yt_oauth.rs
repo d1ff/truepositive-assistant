@@ -44,7 +44,7 @@ async fn auth2(data: web::Data<AppState>, params: web::Query<AuthRequest>) -> Ht
     HttpResponse::Ok().body(html.unwrap())
 }
 
-pub fn run(bot: Arc<Mutex<Box<Bot>>>) -> Result<Server> {
+pub fn run(bot: Arc<Mutex<Box<Bot>>>, addr: String) -> Result<Server> {
     Ok(HttpServer::new(move || {
         let data = AppState { bot: bot.clone() };
         App::new()
@@ -53,6 +53,6 @@ pub fn run(bot: Arc<Mutex<Box<Bot>>>) -> Result<Server> {
             .route("/auth", web::get().to(auth))
             .route("/auth2", web::get().to(auth2))
     })
-    .bind("0.0.0.0:5000")?
+    .bind(addr)?
     .run())
 }

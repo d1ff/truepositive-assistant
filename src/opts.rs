@@ -43,6 +43,9 @@ pub struct BotOpt {
 
     #[structopt(long, env = "REDIS_URL")]
     pub redis_url: String,
+
+    #[structopt(default_value = "0.0.0.0:5000", long, env = "BIND_ADDR")]
+    pub addr: String,
 }
 
 impl BotOpt {

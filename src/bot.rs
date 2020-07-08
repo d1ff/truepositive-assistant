@@ -69,6 +69,17 @@ fn backlog_keyboard(issues: &Issues, params: &BacklogParams) -> InlineKeyboardMa
     kb
 }
 
+macro_rules! match_user_state {
+    ($s:ty, $var:ident, $($value:path),+) => {
+        paste::expr! {
+            match $var {
+                $($s::$value(state) => self.[<handle_command_ $value:snake>](&state, cmd).await?),+,
+                $s::Error => self.handle_command_error(cmd).await?,
+            }
+        }
+    };
+}
+
 pub struct Bot {
     api: Api,
     yt: YouTrack,
@@ -131,8 +142,7 @@ impl Bot {
         message: &Message,
         b: &BacklogParams,
     ) -> Result<UserStateMessages> {
-        self.fetch_issues(message.from.id, message, b).await?;
-        Ok(UserStateMessages::StartBacklog(StartBacklog(b.clone())))
+        self.fetch_issues(message.from.id, message, b).await
     }
 
     async fn _fetch_issues(&self, yt: &YouTrack, top: i32, skip: i32) -> Result<Issues> {
@@ -179,7 +189,7 @@ impl Bot {
         user: UserId,
         msg: &Message,
         params: &BacklogParams,
-    ) -> Result<()> {
+    ) -> Result<UserStateMessages> {
         match self.get_youtrack(user).await {
             Some(yt) => {
                 match self._fetch_issues(yt, params.top, params.skip).await {
@@ -213,22 +223,30 @@ impl Bot {
                                 )
                                 .await?;
                         };
+                        if params.skip == 0 {
+                            Ok(UserStateMessages::StartBacklog(StartBacklog(
+                                params.clone(),
+                            )))
+                        } else {
+                            Ok(UserStateMessages::BacklogPage(BacklogPage(params.clone())))
+                        }
                     }
                     Err(e) => {
                         warn!("Error occured: {}", e);
                         self.api
                             .spawn(msg.text_reply(format!("Error occured: {}", e)));
+                        Ok(UserStateMessages::Noop(Noop {}))
                     }
-                };
+                }
             }
             None => {
                 warn!("No token found for user: {}", user);
                 self.api.spawn(msg.text_reply(format!(
                     "No valid access token founds, use /login command to login in youtrack"
                 )));
+                Ok(UserStateMessages::Noop(Noop {}))
             }
         }
-        Ok(())
     }
 
     async fn handle_start(&self, msg: &Message) -> Result<UserStateMessages> {
@@ -342,246 +360,324 @@ impl Bot {
         Ok((uid, state))
     }
 
-    async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
-        let state_cmd: UserStateMessages = match &state {
-            UserState::Idle(..) => match &cmd {
-                BotCommand::Backlog(msg, p) => self.list_backlog(msg, p).await?,
-                BotCommand::Start(msg) => self.handle_start(msg).await?,
-                BotCommand::Login(msg) => self.handle_login(msg).await?,
-                BotCommand::NewIssue(msg) => self.handle_new_issue(msg).await?,
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::InBacklog(state) => match &cmd {
-                BotCommand::BacklogStop(cb) => {
-                    let msg = cb.message.clone().unwrap();
-                    self.api
-                        .send(msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))))
-                        .await?;
-                    UserStateMessages::StopBacklog(StopBacklog {})
-                }
-                BotCommand::BacklogNext(cb, p) | BotCommand::BacklogPrev(cb, p) => {
-                    let msg = cb.message.clone().unwrap();
-                    self.fetch_issues(cb.from.id, &msg, p).await?;
-                    UserStateMessages::BacklogPage(BacklogPage(p.clone()))
-                }
-                BotCommand::BacklogVoteForIssue(cb, p) => {
-                    let msg = cb.message.clone().unwrap();
-                    let user = cb.from.id;
-                    match self.get_youtrack(user).await {
-                        Some(yt) => match self.vote_for_issue(yt, p.has_vote, p.id.clone()).await {
-                            Ok(_) => {
-                                self.fetch_issues(
-                                    user,
-                                    &msg,
-                                    &BacklogParams::new_with_skip(state.top, state.skip),
-                                )
-                                .await?;
-                                UserStateMessages::Noop(Noop {})
-                            }
-                            Err(e) => {
-                                warn!("Error occured: {}", e);
-                                self.api
-                                    .spawn(msg.text_reply(format!("Error occured: {}", e)));
-                                UserStateMessages::Noop(Noop {})
-                            }
-                        },
-                        None => {
-                            warn!("No youtrack instance for user {}", user);
-                            self.api.spawn(
-                                msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))),
-                            );
-                            self.api.spawn(msg.text_reply(format!("No valid access token founds, use /login command to login in youtrack")));
-                            UserStateMessages::StopBacklog(StopBacklog {})
+    async fn handle_command_idle(
+        &mut self,
+        _state: &Idle,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        Ok(match &cmd {
+            BotCommand::Backlog(msg, p) => self.list_backlog(msg, p).await?,
+            BotCommand::Start(msg) => self.handle_start(msg).await?,
+            BotCommand::Login(msg) => self.handle_login(msg).await?,
+            BotCommand::NewIssue(msg) => self.handle_new_issue(msg).await?,
+            _ => UserStateMessages::Noop(Noop {}),
+        })
+    }
+
+    async fn handle_command_in_backlog(
+        &mut self,
+        state: &InBacklog,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let msg = match &cmd {
+            BotCommand::BacklogStop(cb) => {
+                let msg = cb.message.clone().unwrap();
+                self.api
+                    .send(msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))))
+                    .await?;
+                UserStateMessages::StopBacklog(StopBacklog {})
+            }
+            BotCommand::BacklogNext(cb, p) | BotCommand::BacklogPrev(cb, p) => {
+                let msg = cb.message.clone().unwrap();
+                self.fetch_issues(cb.from.id, &msg, p).await?
+            }
+            BotCommand::BacklogVoteForIssue(cb, p) => {
+                let msg = cb.message.clone().unwrap();
+                let user = cb.from.id;
+                match self.get_youtrack(user).await {
+                    Some(yt) => match self.vote_for_issue(yt, p.has_vote, p.id.clone()).await {
+                        Ok(_) => {
+                            self.fetch_issues(
+                                user,
+                                &msg,
+                                &BacklogParams::new_with_skip(state.top, state.skip),
+                            )
+                            .await?
                         }
-                    }
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssue(state) => match &cmd {
-                BotCommand::Text(msg) => {
-                    if let Some(summary) = cmd.get_message_text() {
-                        let projects = self.get_projects().await?;
-                        let kb = make_reply_keyboard(projects, |s| s.name.clone().unwrap());
-                        self.api.spawn(
-                            msg.from
-                                .text(format!("Got it. Now select project for the issue."))
-                                .reply_markup(kb),
-                        );
-                        state.summary(summary)
-                    } else {
-                        UserStateMessages::Noop(Noop {})
-                    }
-                }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssueSummary(state) => match &cmd {
-                BotCommand::Text(msg) => {
-                    if let Some(project) = cmd.get_message_text() {
-                        match self.get_project(project).await {
-                            Ok(project) => {
-                                let stream = project.streams(&self.yt).await?;
-                                let values = stream.values.unwrap();
-                                let kb = make_reply_keyboard(values, |s| s.name.clone());
-                                self.api.spawn(
-                                    msg.from
-                                        .text("Got it. Now select stream for the issue")
-                                        .reply_markup(kb),
-                                );
-                                state.project(project)
-                            }
-                            Err(_) => UserStateMessages::Noop(Noop {}),
+                        Err(e) => {
+                            warn!("Error occured: {}", e);
+                            self.api
+                                .spawn(msg.text_reply(format!("Error occured: {}", e)));
+                            UserStateMessages::Noop(Noop {})
                         }
-                    } else {
-                        UserStateMessages::Noop(Noop {})
+                    },
+                    None => {
+                        warn!("No youtrack instance for user {}", user);
+                        self.api
+                            .spawn(msg.edit_reply_markup(Some(reply_markup!(inline_keyboard, []))));
+                        self.api.spawn(msg.text_reply(format!(
+                            "No valid access token founds, use /login command to login in youtrack"
+                        )));
+                        UserStateMessages::StopBacklog(StopBacklog {})
                     }
                 }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(msg)
+    }
+
+    async fn handle_command_new_issue(
+        &mut self,
+        state: &NewIssue,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let res = match &cmd {
+            BotCommand::Text(msg) => {
+                if let Some(summary) = cmd.get_message_text() {
+                    let projects = self.get_projects().await?;
+                    let kb = make_reply_keyboard(projects, |s| s.name.clone().unwrap());
+                    self.api.spawn(
+                        msg.from
+                            .text(format!("Got it. Now select project for the issue."))
+                            .reply_markup(kb),
+                    );
+                    state.summary(summary)
+                } else {
+                    UserStateMessages::Noop(Noop {})
                 }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssueSummaryProject(state) => match &cmd {
-                BotCommand::Text(msg) => {
-                    if let Some(stream) = cmd.get_message_text() {
-                        // TODO: parse stream
-                        let stream_bundle = state.project.streams(&self.yt).await?;
-                        if stream_bundle.has_value(&stream) {
-                            let type_bundle = state.project.types(&self.yt).await?;
-                            let values = type_bundle.values.unwrap();
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(res)
+    }
+
+    async fn handle_command_new_issue_summary(
+        &mut self,
+        state: &NewIssueSummary,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let res = match &cmd {
+            BotCommand::Text(msg) => {
+                if let Some(project) = cmd.get_message_text() {
+                    match self.get_project(project).await {
+                        Ok(project) => {
+                            let stream = project.streams(&self.yt).await?;
+                            let values = stream.values.unwrap();
                             let kb = make_reply_keyboard(values, |s| s.name.clone());
                             self.api.spawn(
                                 msg.from
-                                    .text("Got it. Now select issue type.")
+                                    .text("Got it. Now select stream for the issue")
                                     .reply_markup(kb),
                             );
-                            let field = state.project.get_project_custom_field("Stream").unwrap();
-                            state.stream(IssueStream(field.id.clone(), stream))
-                        } else {
-                            UserStateMessages::Noop(Noop {})
+                            state.project(project)
                         }
-                    } else {
-                        UserStateMessages::Noop(Noop {})
+                        Err(_) => UserStateMessages::Noop(Noop {}),
                     }
+                } else {
+                    UserStateMessages::Noop(Noop {})
                 }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssueSummaryProjectStream(state) => match &cmd {
-                BotCommand::Text(msg) => {
-                    if let Some(issue_type) = cmd.get_message_text() {
-                        // TODO: parse type
-                        //
-                        let type_bundle = state.project.types(&self.yt).await?;
-                        if type_bundle.has_value(&issue_type) {
-                            self.api
-                                .spawn(msg.from.text("Got it. Now type in issue description."));
-
-                            let field = state.project.get_project_custom_field("Type").unwrap();
-                            state.issue_type(IssueType(field.id.clone(), issue_type))
-                        } else {
-                            UserStateMessages::Noop(Noop {})
-                        }
-                    } else {
-                        UserStateMessages::Noop(Noop {})
-                    }
-                }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssueSummaryProjectStreamType(state) => match &cmd {
-                BotCommand::Text(msg) => {
-                    if let Some(desc) = cmd.get_message_text() {
-                        let kb = reply_markup!(
-                            reply_keyboard,
-                            selective,
-                            one_time,
-                            resize,
-                            ["/save", "/cancel"]
-                        );
-
-                        let mut context = Context::new();
-                        context.insert("issue", &state);
-                        context.insert("desc", &desc);
-                        let txt_msg = self.templates.render("new_issue.md", &context).unwrap();
-
-                        self.api.spawn(
-                            msg.from
-                                .text(txt_msg)
-                                .reply_markup(kb)
-                                .parse_mode(ParseMode::Markdown),
-                        );
-                        state.desc(desc)
-                    } else {
-                        UserStateMessages::Noop(Noop {})
-                    }
-                }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
-            UserState::NewIssueSummaryProjectStreamTypeDesc(state) => match &cmd {
-                BotCommand::Save(msg) => {
-                    self.api.spawn(msg.from.text("save"));
-                    let mut new_issue = IssueDraft::new();
-                    let new_issue = new_issue
-                        .summary(state.summary.clone())
-                        .desc(state.desc.clone())
-                        .project(ProjectId {
-                            id: state.project.id.clone(),
-                        })
-                        .custom_field(
-                            state.stream.0.clone(),
-                            "Stream".to_string(),
-                            state.stream.1.clone(),
-                        )
-                        .custom_field(
-                            state.issue_type.0.clone(),
-                            "Type".to_string(),
-                            state.issue_type.1.clone(),
-                        );
-                    let i = self.yt.post(new_issue).issues().fields("idReadable");
-                    let (headers, status, json) = i.execute::<Value>().await?;
-
-                    debug!("{:#?}", headers);
-                    debug!("{}", status);
-                    debug!("{:?}", json);
-                    if status.is_success() {
-                        let issue_id = json.unwrap();
-                        let issue_id = issue_id.get("idReadable").unwrap().as_str().unwrap();
-                        self.api
-                            .spawn(msg.from.text(format!("Issue {} created", issue_id)))
-                    } else {
-                        if let Ok(err) = serde_json::from_value::<YoutrackError>(json.unwrap()) {
-                            // TODO: wrap into YoutrackError kind
-                            bail!(err.error_description);
-                        } else {
-                            bail!("Unable to create issue");
-                        }
-                    };
-                    UserStateMessages::Save(Save {})
-                }
-                BotCommand::Cancel(msg) => {
-                    self.api.spawn(msg.from.text("cancel"));
-                    UserStateMessages::Cancel(Cancel {})
-                }
-                _ => UserStateMessages::Noop(Noop {}),
-            },
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
             _ => UserStateMessages::Noop(Noop {}),
         };
-        Ok(state.execute(state_cmd))
+        Ok(res)
+    }
+
+    async fn handle_command_new_issue_summary_project(
+        &mut self,
+        state: &NewIssueSummaryProject,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let res = match &cmd {
+            BotCommand::Text(msg) => {
+                if let Some(stream) = cmd.get_message_text() {
+                    // TODO: parse stream
+                    let stream_bundle = state.project.streams(&self.yt).await?;
+                    if stream_bundle.has_value(&stream) {
+                        let type_bundle = state.project.types(&self.yt).await?;
+                        let values = type_bundle.values.unwrap();
+                        let kb = make_reply_keyboard(values, |s| s.name.clone());
+                        self.api.spawn(
+                            msg.from
+                                .text("Got it. Now select issue type.")
+                                .reply_markup(kb),
+                        );
+                        let field = state.project.get_project_custom_field("Stream").unwrap();
+                        state.stream(IssueStream(field.id.clone(), stream))
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                } else {
+                    UserStateMessages::Noop(Noop {})
+                }
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(res)
+    }
+
+    async fn handle_command_new_issue_summary_project_stream(
+        &mut self,
+        state: &NewIssueSummaryProjectStream,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let res = match &cmd {
+            BotCommand::Text(msg) => {
+                if let Some(issue_type) = cmd.get_message_text() {
+                    // TODO: parse type
+                    //
+                    let type_bundle = state.project.types(&self.yt).await?;
+                    if type_bundle.has_value(&issue_type) {
+                        self.api
+                            .spawn(msg.from.text("Got it. Now type in issue description."));
+
+                        let field = state.project.get_project_custom_field("Type").unwrap();
+                        state.issue_type(IssueType(field.id.clone(), issue_type))
+                    } else {
+                        UserStateMessages::Noop(Noop {})
+                    }
+                } else {
+                    UserStateMessages::Noop(Noop {})
+                }
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(res)
+    }
+
+    async fn handle_command_new_issue_summary_project_stream_type(
+        &mut self,
+        state: &NewIssueSummaryProjectStreamType,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        Ok(match &cmd {
+            BotCommand::Text(msg) => {
+                if let Some(desc) = cmd.get_message_text() {
+                    let kb = reply_markup!(
+                        reply_keyboard,
+                        selective,
+                        one_time,
+                        resize,
+                        ["/save", "/cancel"]
+                    );
+
+                    let mut context = Context::new();
+                    context.insert("issue", &state);
+                    context.insert("desc", &desc);
+                    let txt_msg = self.templates.render("new_issue.md", &context).unwrap();
+
+                    self.api.spawn(
+                        msg.from
+                            .text(txt_msg)
+                            .reply_markup(kb)
+                            .parse_mode(ParseMode::Markdown),
+                    );
+                    state.desc(desc)
+                } else {
+                    UserStateMessages::Noop(Noop {})
+                }
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        })
+    }
+
+    async fn handle_command_new_issue_summary_project_stream_type_desc(
+        &mut self,
+        state: &NewIssueSummaryProjectStreamTypeDesc,
+        cmd: BotCommand,
+    ) -> Result<UserStateMessages> {
+        let res = match &cmd {
+            BotCommand::Save(msg) => {
+                self.api.spawn(msg.from.text("save"));
+                let mut new_issue = IssueDraft::new();
+                let new_issue = new_issue
+                    .summary(state.summary.clone())
+                    .desc(state.desc.clone())
+                    .project(ProjectId {
+                        id: state.project.id.clone(),
+                    })
+                    .custom_field(
+                        state.stream.0.clone(),
+                        "Stream".to_string(),
+                        state.stream.1.clone(),
+                    )
+                    .custom_field(
+                        state.issue_type.0.clone(),
+                        "Type".to_string(),
+                        state.issue_type.1.clone(),
+                    );
+                let i = self.yt.post(new_issue).issues().fields("idReadable");
+                let (headers, status, json) = i.execute::<Value>().await?;
+
+                debug!("{:#?}", headers);
+                debug!("{}", status);
+                debug!("{:?}", json);
+                if status.is_success() {
+                    let issue_id = json.unwrap();
+                    let issue_id = issue_id.get("idReadable").unwrap().as_str().unwrap();
+                    self.api
+                        .spawn(msg.from.text(format!("Issue {} created", issue_id)))
+                } else {
+                    if let Ok(err) = serde_json::from_value::<YoutrackError>(json.unwrap()) {
+                        // TODO: wrap into YoutrackError kind
+                        bail!(err.error_description);
+                    } else {
+                        bail!("Unable to create issue");
+                    }
+                };
+                UserStateMessages::Save(Save {})
+            }
+            BotCommand::Cancel(msg) => {
+                self.api.spawn(msg.from.text("cancel"));
+                UserStateMessages::Cancel(Cancel {})
+            }
+            _ => UserStateMessages::Noop(Noop {}),
+        };
+        Ok(res)
+    }
+    async fn handle_command_error(&mut self, _cmd: BotCommand) -> Result<UserStateMessages> {
+        Ok(UserStateMessages::Noop(Noop {}))
+    }
+
+    async fn handle_command(&mut self, state: UserState, cmd: BotCommand) -> Result<UserState> {
+        let state_copy = state.clone();
+        let state_cmd = match_user_state!(
+            UserState,
+            state_copy,
+            Idle,
+            InBacklog,
+            NewIssue,
+            NewIssueSummary,
+            NewIssueSummaryProject,
+            NewIssueSummaryProjectStream,
+            NewIssueSummaryProjectStreamType,
+            NewIssueSummaryProjectStreamTypeDesc
+        );
+        let new_state = state.execute(state_cmd);
+        if let UserState::Error = new_state {
+            bail!("Invalid transition")
+        }
+        Ok(new_state)
     }
 
     pub async fn dispatch_update(&mut self, update: Update) -> Result<()> {
