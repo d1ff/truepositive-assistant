@@ -48,18 +48,10 @@ pub struct IssueSummary(pub String);
 pub struct IssueSummaryProject(pub String, pub Project);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum IssueStream {
-    Sla,
-    Presale,
-    Plan,
-}
+pub struct IssueStream(pub String, pub String);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum IssueType {
-    Sla,
-    Presale,
-    Plan,
-}
+pub struct IssueType(pub String, pub String);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct IssueSummaryProjectStream(pub String, pub Project, pub IssueStream);

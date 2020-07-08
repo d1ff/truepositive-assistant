@@ -18,6 +18,20 @@ use super::models::*;
 use super::opts::*;
 use super::states::*;
 
+fn make_reply_keyboard<T>(values: Vec<T>, f: fn(&T) -> String) -> ReplyKeyboardMarkup {
+    let mut kb = ReplyKeyboardMarkup::new();
+    kb.one_time_keyboard().resize_keyboard();
+
+    for chunk in values.chunks(3) {
+        let mut row: Vec<KeyboardButton> = Vec::new();
+        for val in chunk.iter() {
+            row.push(KeyboardButton::new(f(val)));
+        }
+        kb.add_row(row);
+    }
+    kb
+}
+
 fn backlog_keyboard(issues: &Issues, params: &BacklogParams) -> InlineKeyboardMarkup {
     let mut kb = InlineKeyboardMarkup::new();
     let mut row: Vec<InlineKeyboardButton> = Vec::new();
@@ -387,16 +401,7 @@ impl Bot {
                 BotCommand::Text(msg) => {
                     if let Some(summary) = cmd.get_message_text() {
                         let projects = self.get_projects().await?;
-                        let mut kb = ReplyKeyboardMarkup::new();
-                        kb.one_time_keyboard().resize_keyboard();
-
-                        for projects_chunk in projects.chunks(3) {
-                            let mut row: Vec<KeyboardButton> = Vec::new();
-                            for project in projects_chunk.iter() {
-                                row.push(KeyboardButton::new(project.name.clone().unwrap()));
-                            }
-                            kb.add_row(row);
-                        }
+                        let kb = make_reply_keyboard(projects, |s| s.name.clone().unwrap());
                         self.api.spawn(
                             msg.from
                                 .text(format!("Got it. Now select project for the issue."))
@@ -419,17 +424,8 @@ impl Bot {
                         match self.get_project(project).await {
                             Ok(project) => {
                                 let stream = project.streams(&self.yt).await?;
-
-                                let mut kb = ReplyKeyboardMarkup::new();
-                                kb.one_time_keyboard().resize_keyboard();
-
-                                for projects_chunk in stream.values.unwrap().chunks(3) {
-                                    let mut row: Vec<KeyboardButton> = Vec::new();
-                                    for project in projects_chunk.iter() {
-                                        row.push(KeyboardButton::new(project.name.clone()));
-                                    }
-                                    kb.add_row(row);
-                                }
+                                let values = stream.values.unwrap();
+                                let kb = make_reply_keyboard(values, |s| s.name.clone());
                                 self.api.spawn(
                                     msg.from
                                         .text("Got it. Now select stream for the issue")
@@ -453,20 +449,21 @@ impl Bot {
                 BotCommand::Text(msg) => {
                     if let Some(stream) = cmd.get_message_text() {
                         // TODO: parse stream
-                        let kb = reply_markup!(
-                            reply_keyboard,
-                            selective,
-                            one_time,
-                            resize,
-                            ["Task", "Bug", "Researh"]
-                        );
-                        self.api.spawn(
-                            msg.from
-                                .text("Got it. Now select issue type.")
-                                .reply_markup(kb),
-                        );
-
-                        state.stream(IssueStream::Plan {})
+                        let stream_bundle = state.project.streams(&self.yt).await?;
+                        if stream_bundle.has_value(&stream) {
+                            let type_bundle = state.project.types(&self.yt).await?;
+                            let values = type_bundle.values.unwrap();
+                            let kb = make_reply_keyboard(values, |s| s.name.clone());
+                            self.api.spawn(
+                                msg.from
+                                    .text("Got it. Now select issue type.")
+                                    .reply_markup(kb),
+                            );
+                            let field = state.project.get_project_custom_field("Stream").unwrap();
+                            state.stream(IssueStream(field.id.clone(), stream))
+                        } else {
+                            UserStateMessages::Noop(Noop {})
+                        }
                     } else {
                         UserStateMessages::Noop(Noop {})
                     }
@@ -479,13 +476,19 @@ impl Bot {
             },
             UserState::NewIssueSummaryProjectStream(state) => match &cmd {
                 BotCommand::Text(msg) => {
-                    if let Some(_issue_type) = cmd.get_message_text() {
+                    if let Some(issue_type) = cmd.get_message_text() {
                         // TODO: parse type
                         //
-                        self.api
-                            .spawn(msg.from.text("Got it. Now type in issue description."));
+                        let type_bundle = state.project.types(&self.yt).await?;
+                        if type_bundle.has_value(&issue_type) {
+                            self.api
+                                .spawn(msg.from.text("Got it. Now type in issue description."));
 
-                        state.issue_type(IssueType::Plan {})
+                            let field = state.project.get_project_custom_field("Type").unwrap();
+                            state.issue_type(IssueType(field.id.clone(), issue_type))
+                        } else {
+                            UserStateMessages::Noop(Noop {})
+                        }
                     } else {
                         UserStateMessages::Noop(Noop {})
                     }
@@ -529,10 +532,45 @@ impl Bot {
                 }
                 _ => UserStateMessages::Noop(Noop {}),
             },
-            UserState::NewIssueSummaryProjectStreamTypeDesc(_state) => match &cmd {
+            UserState::NewIssueSummaryProjectStreamTypeDesc(state) => match &cmd {
                 BotCommand::Save(msg) => {
                     self.api.spawn(msg.from.text("save"));
-                    // TODO: save issue
+                    let mut new_issue = IssueDraft::new();
+                    let new_issue = new_issue
+                        .summary(state.summary.clone())
+                        .desc(state.desc.clone())
+                        .project(ProjectId {
+                            id: state.project.id.clone(),
+                        })
+                        .custom_field(
+                            state.stream.0.clone(),
+                            "Stream".to_string(),
+                            state.stream.1.clone(),
+                        )
+                        .custom_field(
+                            state.issue_type.0.clone(),
+                            "Type".to_string(),
+                            state.issue_type.1.clone(),
+                        );
+                    let i = self.yt.post(new_issue).issues().fields("idReadable");
+                    let (headers, status, json) = i.execute::<Value>().await?;
+
+                    debug!("{:#?}", headers);
+                    debug!("{}", status);
+                    debug!("{:?}", json);
+                    if status.is_success() {
+                        let issue_id = json.unwrap();
+                        let issue_id = issue_id.get("idReadable").unwrap().as_str().unwrap();
+                        self.api
+                            .spawn(msg.from.text(format!("Issue {} created", issue_id)))
+                    } else {
+                        if let Ok(err) = serde_json::from_value::<YoutrackError>(json.unwrap()) {
+                            // TODO: wrap into YoutrackError kind
+                            bail!(err.error_description);
+                        } else {
+                            bail!("Unable to create issue");
+                        }
+                    };
                     UserStateMessages::Save(Save {})
                 }
                 BotCommand::Cancel(msg) => {

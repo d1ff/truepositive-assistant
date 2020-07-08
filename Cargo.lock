@@ -3326,7 +3326,7 @@ dependencies = [
 [[package]]
 name = "youtrack-rs"
 version = "0.2.5"
-source = "git+https://github.com/d1ff/youtrack-rs#fe1fe67192e4aadb8b86c387463f4b318310ca0e"
+source = "git+https://github.com/d1ff/youtrack-rs#fd44dade8d889b1b31a33b2475af74024700c6d4"
 dependencies = [
  "async-trait",
  "error-chain",
