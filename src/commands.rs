@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::convert::{From, TryFrom};
 use telegram_bot::types::{
-    CallbackQuery, InlineKeyboardButton, Message, MessageKind, Update, UpdateKind,
+    CallbackQuery, InlineKeyboardButton, Message, MessageKind, Update, UpdateKind, User,
 };
 
 use crate::errors::*;
@@ -114,6 +114,23 @@ impl BotCommand {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn get_user(&self) -> &User {
+        match self {
+            BotCommand::Start(m) => &m.from,
+            BotCommand::Backlog(m, _) => &m.from,
+            BotCommand::Login(m) => &m.from,
+            BotCommand::Stop(m) => &m.from,
+            BotCommand::Text(m) => &m.from,
+            BotCommand::NewIssue(m) => &m.from,
+            BotCommand::BacklogStop(m) => &m.from,
+            BotCommand::BacklogNext(m, _) => &m.from,
+            BotCommand::BacklogPrev(m, _) => &m.from,
+            BotCommand::BacklogVoteForIssue(m, _) => &m.from,
+            BotCommand::Save(m) => &m.from,
+            BotCommand::Cancel(m) => &m.from,
         }
     }
 }

@@ -606,55 +606,64 @@ impl Bot {
         state: &NewIssueSummaryProjectStreamTypeDesc,
         cmd: BotCommand,
     ) -> Result<UserStateMessages> {
+        let user = cmd.get_user();
         let res = match &cmd {
             BotCommand::Save(msg) => {
-                self.api.spawn(msg.from.text("save"));
-                let mut new_issue = IssueDraft::new();
-                let new_issue = new_issue
-                    .summary(state.summary.clone())
-                    .desc(state.desc.clone())
-                    .project(ProjectId {
-                        id: state.project.id.clone(),
-                    })
-                    .custom_field(
-                        state.stream.0.clone(),
-                        "Stream".to_string(),
-                        state.stream.1.clone(),
-                    )
-                    .custom_field(
-                        state.issue_type.0.clone(),
-                        "Type".to_string(),
-                        state.issue_type.1.clone(),
-                    );
-                let i = self.yt.post(new_issue).issues().fields("idReadable");
-                let (headers, status, json) = i.execute::<Value>().await?;
+                if let Some(yt) = self.get_youtrack(user.id).await {
+                    self.api.spawn(msg.from.text("Saving issue"));
+                    let mut new_issue = IssueDraft::new();
+                    let new_issue = new_issue
+                        .summary(state.summary.clone())
+                        .desc(state.desc.clone())
+                        .project(ProjectId {
+                            id: state.project.id.clone(),
+                        })
+                        .custom_field(
+                            state.stream.0.clone(),
+                            "Stream".to_string(),
+                            state.stream.1.clone(),
+                        )
+                        .custom_field(
+                            state.issue_type.0.clone(),
+                            "Type".to_string(),
+                            state.issue_type.1.clone(),
+                        );
+                    let i = yt.post(new_issue).issues().fields("idReadable");
+                    let (headers, status, json) = i.execute::<Value>().await?;
 
-                debug!("{:#?}", headers);
-                debug!("{}", status);
-                debug!("{:?}", json);
-                if status.is_success() {
-                    let issue_id = json.unwrap();
-                    let issue_id = issue_id.get("idReadable").unwrap().as_str().unwrap();
-                    self.api
-                        .spawn(msg.from.text(format!("Issue {} created", issue_id)))
-                } else {
-                    if let Ok(err) = serde_json::from_value::<YoutrackError>(json.unwrap()) {
-                        // TODO: wrap into YoutrackError kind
-                        bail!(err.error_description);
+                    debug!("{:#?}", headers);
+                    debug!("{}", status);
+                    debug!("{:?}", json);
+                    if status.is_success() {
+                        let issue_id = json.unwrap();
+                        let issue_id = issue_id.get("idReadable").unwrap().as_str().unwrap();
+                        self.api
+                            .spawn(msg.from.text(format!("Issue {} created", issue_id)))
                     } else {
-                        bail!("Unable to create issue");
-                    }
-                };
-                UserStateMessages::Save(Save {})
+                        if let Ok(err) = serde_json::from_value::<YoutrackError>(json.unwrap()) {
+                            // TODO: wrap into YoutrackError kind
+                            bail!(err.error_description);
+                        } else {
+                            bail!("Unable to create issue");
+                        }
+                    };
+                    UserStateMessages::Save(Save {})
+                } else {
+                    self.api.spawn(msg.text_reply(format!(
+                        "No valid access token founds, use /login command to login in youtrack"
+                    )));
+                    UserStateMessages::Noop(Noop {})
+                }
             }
             BotCommand::Cancel(msg) => {
-                self.api.spawn(msg.from.text("cancel"));
+                self.api.spawn(msg.from.text("Issue discarded"));
                 UserStateMessages::Cancel(Cancel {})
             }
             _ => UserStateMessages::Noop(Noop {}),
         };
         Ok(res)
     }
+
     async fn handle_command_error(&mut self, _cmd: BotCommand) -> Result<UserStateMessages> {
         Ok(UserStateMessages::Noop(Noop {}))
     }
@@ -685,7 +694,7 @@ impl Bot {
         debug!("UID: {}, STATE: {:?}", uid, state);
         let command: BotCommand = update.try_into()?;
 
-        match self.handle_command(state, command.clone()).await {
+        match self.handle_command(state, command).await {
             Ok(new_state) => {
                 let mut con = self.redis.get_connection()?;
                 let key = format!("state:{}", uid);
